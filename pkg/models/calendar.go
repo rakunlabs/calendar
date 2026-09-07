@@ -1,7 +1,7 @@
 package models
 
 import (
-	"github.com/worldline-go/calendar/internal/core/domain"
+	"github.com/rakunlabs/calendar/internal/core/domain"
 )
 
 type (

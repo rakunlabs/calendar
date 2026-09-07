@@ -1,5 +1,5 @@
 package domain
 
-import "github.com/worldline-go/query"
+import "github.com/rakunlabs/query"
 
 type Query = query.Query

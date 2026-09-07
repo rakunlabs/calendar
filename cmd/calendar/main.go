@@ -3,16 +3,17 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/rakunlabs/chu"
-	"github.com/rs/zerolog/log"
-	"github.com/worldline-go/initializer"
-	"github.com/worldline-go/tell"
+	"github.com/rakunlabs/into"
+	"github.com/rakunlabs/logi"
+	"github.com/rakunlabs/tell"
 
-	"github.com/worldline-go/calendar/internal/adapter/repository"
-	"github.com/worldline-go/calendar/internal/config"
-	"github.com/worldline-go/calendar/internal/core/service"
-	"github.com/worldline-go/calendar/internal/server"
+	"github.com/rakunlabs/calendar/internal/adapter/repository"
+	"github.com/rakunlabs/calendar/internal/config"
+	"github.com/rakunlabs/calendar/internal/core/service"
+	"github.com/rakunlabs/calendar/internal/server"
 )
 
 var (
@@ -24,9 +25,10 @@ var (
 func main() {
 	config.ServiceVersion = version
 
-	initializer.Init(
+	into.Init(
 		run,
-		initializer.WithMsgf("%s [%s] build %s %s", config.ServiceName, config.ServiceVersion, commit, date),
+		into.WithLogger(logi.InitializeLog(logi.WithCaller(false))),
+		into.WithMsgf("%s [%s] build %s %s", config.ServiceName, config.ServiceVersion, commit, date),
 	)
 }
 
@@ -36,7 +38,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	log.Log().RawJSON("config", chu.MarshalJSON(cfg)).Msg("loaded Config")
+	slog.InfoContext(ctx, "loaded configuration", "config", chu.MarshalMap(cfg))
 
 	// ///////////////////////////////////////////////////////
 	// telemetry initialize
@@ -74,7 +76,5 @@ func run(ctx context.Context) error {
 
 	// ///////////////////////////////////////////////////////
 	// start server
-	initializer.ShutdownAdd(srv.Stop, "server")
-
-	return srv.Start(fmt.Sprintf(":%d", cfg.Port))
+	return srv.StartWithContext(ctx, fmt.Sprintf(":%d", cfg.Port))
 }

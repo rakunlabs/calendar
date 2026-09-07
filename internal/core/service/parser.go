@@ -2,11 +2,10 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
-	"github.com/rs/zerolog/log"
-
-	"github.com/worldline-go/calendar/pkg/ical"
+	"github.com/rakunlabs/calendar/pkg/ical"
 )
 
 func (s *CalendarService) getRRule(ctx context.Context, repeatStr string) (*ical.Repeat, error) {
@@ -14,7 +13,7 @@ func (s *CalendarService) getRRule(ctx context.Context, repeatStr string) (*ical
 	rrule, ok, err := s.cacheRule.Get(ctx, repeatStr)
 	s.m.RUnlock()
 	if err != nil {
-		log.Error().Err(err).Msg("failed to get rrule from cache")
+		slog.ErrorContext(ctx, "failed to get rrule from cache", "error", err)
 	}
 
 	if ok {
@@ -27,7 +26,7 @@ func (s *CalendarService) getRRule(ctx context.Context, repeatStr string) (*ical
 	// Double-check cache after acquiring write lock (to avoid race)
 	rrule, ok, err = s.cacheRule.Get(ctx, repeatStr)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to get rrule from cache (after lock)")
+		slog.ErrorContext(ctx, "failed to get rrule from cache (after lock)", "error", err)
 	}
 	if ok {
 		return rrule, nil
@@ -39,7 +38,7 @@ func (s *CalendarService) getRRule(ctx context.Context, repeatStr string) (*ical
 	}
 
 	if err := s.cacheRule.Set(ctx, repeatStr, rrule); err != nil {
-		log.Error().Err(err).Msg("failed to set rrule in cache")
+		slog.ErrorContext(ctx, "failed to set rrule in cache", "error", err)
 	}
 
 	return rrule, nil
@@ -50,7 +49,7 @@ func (s *CalendarService) TZLocation(tz string) (*time.Location, error) {
 	loc, ok, err := s.cacheTZ.Get(context.Background(), tz)
 	s.m.RUnlock()
 	if err != nil {
-		log.Error().Err(err).Msg("failed to get location from cache")
+		slog.Error("failed to get location from cache", "error", err)
 	}
 
 	if ok {
@@ -63,7 +62,7 @@ func (s *CalendarService) TZLocation(tz string) (*time.Location, error) {
 	// Double-check cache after acquiring write lock (to avoid race)
 	loc, ok, err = s.cacheTZ.Get(context.Background(), tz)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to get location from cache (after lock)")
+		slog.Error("failed to get location from cache (after lock)", "error", err)
 	}
 	if ok {
 		return loc, nil
@@ -74,7 +73,7 @@ func (s *CalendarService) TZLocation(tz string) (*time.Location, error) {
 		return nil, err
 	}
 	if err := s.cacheTZ.Set(context.Background(), tz, loc); err != nil {
-		log.Error().Err(err).Msg("failed to set location in cache")
+		slog.Error("failed to set location in cache", "error", err)
 	}
 
 	return loc, nil

@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rakunlabs/calendar/pkg/models"
+	"github.com/rakunlabs/query"
 	"github.com/stretchr/testify/suite"
-	"github.com/worldline-go/calendar/pkg/models"
-	"github.com/worldline-go/query"
 	"github.com/worldline-go/test/container/containerpostgres"
 	"github.com/worldline-go/types"
 )
@@ -33,6 +33,31 @@ func TestDatabase(t *testing.T) {
 	suite.Run(t, new(DatabaseSuite))
 }
 
+func (s *DatabaseSuite) TestCountIgnoresPaginationAndSort() {
+	ctx := s.T().Context()
+	start := time.Now()
+	events := []models.Event{
+		{Name: "Count test one", EventGroup: types.NewNull("count-test"), DateFrom: types.Time{Time: start}, DateTo: types.Time{Time: start.Add(time.Hour)}},
+		{Name: "Count test two", EventGroup: types.NewNull("count-test"), DateFrom: types.Time{Time: start}, DateTo: types.Time{Time: start.Add(time.Hour)}},
+	}
+	s.Require().NoError(s.db.AddEvents(ctx, events))
+	defer s.db.RemoveEvent(ctx, events[0].ID, events[1].ID)
+	q, err := query.Parse("event_group=count-test&_limit=1&_offset=10&_sort=name")
+	s.Require().NoError(err)
+	count, err := s.db.GetEventsCount(ctx, q)
+	s.Require().NoError(err)
+	s.Equal(uint64(2), count)
+	s.Require().NoError(s.db.AddRelations(ctx, []models.Relation{
+		{Entity: "count-test", EventID: types.NewNull(events[0].ID)},
+		{Entity: "count-test", EventID: types.NewNull(events[1].ID)},
+	}))
+	q, err = query.Parse("entity=count-test&_limit=1&_offset=10&_sort=event_id")
+	s.Require().NoError(err)
+	count, err = s.db.GetRelationsCount(ctx, q)
+	s.Require().NoError(err)
+	s.Equal(uint64(2), count)
+}
+
 func (s *DatabaseSuite) TearDownSuite() {
 	s.container.Stop(s.T())
 }
@@ -50,7 +75,7 @@ func (s *DatabaseSuite) TestAddEvents() {
 	err := s.db.AddEvents(s.T().Context(), events)
 	s.Require().NoError(err)
 
-	parse, err := query.Parse("", query.WithExpressionCmp("id", query.ExpressionCmp{
+	parse, err := query.Parse("", query.WithExpressionCmp("id", &query.ExpressionCmp{
 		Operator: query.OperatorEq,
 		Field:    "id",
 		Value:    events[0].ID,
@@ -75,7 +100,7 @@ func (s *DatabaseSuite) TestAddEvents() {
 	err = s.db.RemoveEvent(s.T().Context(), events[0].ID)
 	s.Require().NoError(err)
 	// check if removed
-	parse, err = query.Parse("", query.WithExpressionCmp("id", query.ExpressionCmp{
+	parse, err = query.Parse("", query.WithExpressionCmp("id", &query.ExpressionCmp{
 		Operator: query.OperatorEq,
 		Field:    "id",
 		Value:    events[0].ID,
@@ -99,7 +124,7 @@ func (s *DatabaseSuite) TestUpdateEvent() {
 	s.Require().NoError(err)
 
 	// Fetch the event to get its ID
-	parse, err := query.Parse("", query.WithExpressionCmp("name", query.ExpressionCmp{
+	parse, err := query.Parse("", query.WithExpressionCmp("name", &query.ExpressionCmp{
 		Operator: query.OperatorEq,
 		Field:    "name",
 		Value:    event.Name,
@@ -154,7 +179,7 @@ func (s *DatabaseSuite) TestAddMultipleEvents() {
 
 	// Check both events exist
 	for _, e := range events {
-		parse, err := query.Parse("", query.WithExpressionCmp("name", query.ExpressionCmp{
+		parse, err := query.Parse("", query.WithExpressionCmp("name", &query.ExpressionCmp{
 			Operator: query.OperatorEq,
 			Field:    "name",
 			Value:    e.Name,
@@ -191,7 +216,7 @@ func (s *DatabaseSuite) TestAddEventWithAllFields() {
 	s.Require().NoError(err)
 
 	// Fetch and check
-	parse, err := query.Parse("", query.WithExpressionCmp("name", query.ExpressionCmp{
+	parse, err := query.Parse("", query.WithExpressionCmp("name", &query.ExpressionCmp{
 		Operator: query.OperatorEq,
 		Field:    "name",
 		Value:    event.Name,

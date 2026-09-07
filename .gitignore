@@ -10,3 +10,7 @@
 /docs/swagger.*
 /config/docs.go
 /dist
+/_ui/node_modules/
+/_ui/dist/
+/_ui/.vite/
+/.impeccable/review/

@@ -16,9 +16,15 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: 1.24
+          go-version: '1.27'
       - name: Unshallow
         run: git fetch --prune --unshallow
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.2.2'
 
       - name: Log in to the Container registry
         uses: docker/login-action@v3

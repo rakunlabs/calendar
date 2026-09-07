@@ -11,7 +11,7 @@ DOCKER_COMPOSE := docker compose --project-name=$(BINARY) --file=env/docker-comp
 .DEFAULT_GOAL := help
 
 .PHONY: run
-run: ## Run the application
+run: ui-build ## Build the UI and run the application
 	go run $(MAIN_FILE)
 
 .PHONY: env
@@ -26,7 +26,7 @@ env-down: ## Destroy environment
 
 # go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" cmd/$(BINARY)/main.go
 .PHONY: build
-build: ## Build the binary
+build: ui-build ## Build the binary
 	goreleaser build --snapshot --clean --single-target
 
 .PHONY: docs
@@ -39,13 +39,25 @@ lint: ## Lint Go files
 	@GOPATH="$(shell dirname $(PWD))" golangci-lint run ./...
 
 .PHONY: test
-test: ## Run unit tests
+test: ui-build ## Run tests
 	@go test -v -race ./...
 
 .PHONY: coverage
-coverage: ## Run unit tests with coverage
+coverage: ui-build ## Run tests with coverage
 	@go test -v -race -cover -coverpkg=./... -coverprofile=coverage.out -covermode=atomic ./...
 	@go tool cover -func=coverage.out
+
+.PHONY: ui-build ui-dev ui-check
+ui-build: ## Install and build the embedded Svelte UI with pnpm
+	pnpm --dir _ui install --frozen-lockfile
+	pnpm --dir _ui build
+
+ui-dev: ## Start Vite with API proxy to localhost:8080
+	pnpm --dir _ui dev
+
+ui-check: ## Type-check and test the UI
+	pnpm --dir _ui check
+	pnpm --dir _ui test
 
 .PHONY: help
 help: ## Display this help screen

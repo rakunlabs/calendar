@@ -5,10 +5,10 @@ import (
 	"io"
 	"time"
 
-	"github.com/worldline-go/query"
+	"github.com/rakunlabs/query"
 	"github.com/worldline-go/types"
 
-	"github.com/worldline-go/calendar/internal/core/domain"
+	"github.com/rakunlabs/calendar/internal/core/domain"
 )
 
 type CalendarPort interface {

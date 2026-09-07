@@ -77,25 +77,28 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/rest.Response-array_github_com_worldline-go_calendar_pkg_models_Event"
+                            "$ref": "#/definitions/internal_adapter_handler.Response-array_github_com_rakunlabs_calendar_pkg_models_Event"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     }
                 }
             },
             "post": {
                 "description": "AddEvents",
+                "consumes": [
+                    "application/json"
+                ],
                 "tags": [
                     "Events"
                 ],
@@ -109,7 +112,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_worldline-go_calendar_pkg_models.Event"
+                                "$ref": "#/definitions/github_com_rakunlabs_calendar_pkg_models.Event"
                             }
                         }
                     }
@@ -118,19 +121,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/rest.Response-array_string"
+                            "$ref": "#/definitions/internal_adapter_handler.Response-array_string"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     }
                 }
@@ -154,19 +157,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     }
                 }
@@ -192,19 +195,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/rest.Response-github_com_worldline-go_calendar_pkg_models_Event"
+                            "$ref": "#/definitions/internal_adapter_handler.Response-github_com_rakunlabs_calendar_pkg_models_Event"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     }
                 }
@@ -229,7 +232,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_worldline-go_calendar_pkg_models.Event"
+                            "$ref": "#/definitions/github_com_rakunlabs_calendar_pkg_models.Event"
                         }
                     }
                 ],
@@ -237,19 +240,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     }
                 }
@@ -273,19 +276,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     }
                 }
@@ -323,19 +326,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/rest.Response-array_github_com_worldline-go_calendar_pkg_models_Event"
+                            "$ref": "#/definitions/internal_adapter_handler.Response-array_github_com_rakunlabs_calendar_pkg_models_Event"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     }
                 }
@@ -372,19 +375,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     }
                 }
@@ -423,19 +426,57 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
+                        }
+                    }
+                }
+            }
+        },
+        "/occurrences": {
+            "get": {
+                "tags": [
+                    "Events"
+                ],
+                "summary": "Get event occurrences in a date range",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Inclusive start (RFC3339)",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exclusive end (RFC3339), at most 400 days after from",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_adapter_handler.Response-array_github_com_rakunlabs_calendar_pkg_models_Event"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     }
                 }
@@ -491,25 +532,28 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/rest.Response-array_github_com_worldline-go_calendar_pkg_models_Relation"
+                            "$ref": "#/definitions/internal_adapter_handler.Response-array_github_com_rakunlabs_calendar_pkg_models_Relation"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     }
                 }
             },
             "post": {
                 "description": "AddRelations",
+                "consumes": [
+                    "application/json"
+                ],
                 "tags": [
                     "Relations"
                 ],
@@ -523,7 +567,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_worldline-go_calendar_pkg_models.Relation"
+                                "$ref": "#/definitions/github_com_rakunlabs_calendar_pkg_models.Relation"
                             }
                         }
                     }
@@ -532,19 +576,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     }
                 }
@@ -580,19 +624,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ResponseMessage"
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     }
                 }
@@ -600,7 +644,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "github_com_worldline-go_calendar_pkg_models.Event": {
+        "github_com_rakunlabs_calendar_pkg_models.Event": {
             "type": "object",
             "properties": {
                 "all_day": {
@@ -641,7 +685,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_worldline-go_calendar_pkg_models.Relation": {
+        "github_com_rakunlabs_calendar_pkg_models.Relation": {
             "type": "object",
             "properties": {
                 "entity": {
@@ -661,7 +705,7 @@ const docTemplate = `{
                 }
             }
         },
-        "rest.Message": {
+        "internal_adapter_handler.Message": {
             "type": "object",
             "properties": {
                 "error": {
@@ -676,65 +720,62 @@ const docTemplate = `{
                 }
             }
         },
-        "rest.Meta": {
+        "internal_adapter_handler.Meta": {
             "type": "object",
             "properties": {
                 "limit": {
-                    "description": "Limit is the limit used within the request.\nIf not defined in the query parameters, this should be the default value used in the service endpoint.",
                     "type": "integer"
                 },
                 "offset": {
-                    "description": "Offset is the offset used within the request.",
                     "type": "integer"
                 },
                 "total_item_count": {
-                    "description": "TotalItemCount is the total number of entities that match the query.",
                     "type": "integer"
                 }
             }
         },
-        "rest.Response-array_github_com_worldline-go_calendar_pkg_models_Event": {
+        "internal_adapter_handler.Response-array_github_com_rakunlabs_calendar_pkg_models_Event": {
             "type": "object",
             "properties": {
                 "message": {
-                    "$ref": "#/definitions/rest.Message"
+                    "$ref": "#/definitions/internal_adapter_handler.Message"
                 },
                 "meta": {
-                    "$ref": "#/definitions/rest.Meta"
+                    "$ref": "#/definitions/internal_adapter_handler.Meta"
                 },
                 "payload": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_worldline-go_calendar_pkg_models.Event"
+                        "$ref": "#/definitions/github_com_rakunlabs_calendar_pkg_models.Event"
                     }
                 }
             }
         },
-        "rest.Response-array_github_com_worldline-go_calendar_pkg_models_Relation": {
+        "internal_adapter_handler.Response-array_github_com_rakunlabs_calendar_pkg_models_Relation": {
             "type": "object",
             "properties": {
                 "message": {
-                    "$ref": "#/definitions/rest.Message"
+                    "$ref": "#/definitions/internal_adapter_handler.Message"
                 },
                 "meta": {
-                    "$ref": "#/definitions/rest.Meta"
+                    "$ref": "#/definitions/internal_adapter_handler.Meta"
                 },
                 "payload": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_worldline-go_calendar_pkg_models.Relation"
+                        "$ref": "#/definitions/github_com_rakunlabs_calendar_pkg_models.Relation"
                     }
                 }
             }
         },
-        "rest.Response-array_string": {
+        "internal_adapter_handler.Response-array_string": {
             "type": "object",
             "properties": {
                 "message": {
-                    "$ref": "#/definitions/rest.Message"
+                    "$ref": "#/definitions/internal_adapter_handler.Message"
                 },
                 "meta": {
-                    "$ref": "#/definitions/rest.Meta"
+                    "$ref": "#/definitions/internal_adapter_handler.Meta"
                 },
                 "payload": {
                     "type": "array",
@@ -744,25 +785,25 @@ const docTemplate = `{
                 }
             }
         },
-        "rest.Response-github_com_worldline-go_calendar_pkg_models_Event": {
+        "internal_adapter_handler.Response-github_com_rakunlabs_calendar_pkg_models_Event": {
             "type": "object",
             "properties": {
                 "message": {
-                    "$ref": "#/definitions/rest.Message"
+                    "$ref": "#/definitions/internal_adapter_handler.Message"
                 },
                 "meta": {
-                    "$ref": "#/definitions/rest.Meta"
+                    "$ref": "#/definitions/internal_adapter_handler.Meta"
                 },
                 "payload": {
-                    "$ref": "#/definitions/github_com_worldline-go_calendar_pkg_models.Event"
+                    "$ref": "#/definitions/github_com_rakunlabs_calendar_pkg_models.Event"
                 }
             }
         },
-        "rest.ResponseMessage": {
+        "internal_adapter_handler.ResponseMessage": {
             "type": "object",
             "properties": {
                 "message": {
-                    "$ref": "#/definitions/rest.Message"
+                    "$ref": "#/definitions/internal_adapter_handler.Message"
                 }
             }
         },

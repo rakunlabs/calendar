@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/worldline-go/calendar/pkg/models"
+	"github.com/rakunlabs/calendar/pkg/models"
 	"github.com/worldline-go/types"
 )
 

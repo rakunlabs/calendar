@@ -19,11 +19,11 @@ export default defineConfig({
     sidebar: [{ text: "Quickstart", link: "/quickstart" }],
 
     socialLinks: [
-      { icon: "github", link: "https://github.com/worldline-go/calendar" },
+      { icon: "github", link: "https://github.com/rakunlabs/calendar" },
     ],
 
     editLink: {
-      pattern: "https://github.com/worldline-go/calendar/edit/main/_docs/:path",
+      pattern: "https://github.com/rakunlabs/calendar/edit/main/_docs/:path",
     },
 
     lastUpdated: {

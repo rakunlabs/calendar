@@ -7,7 +7,7 @@ Storage need [PostgreSQL](https://www.postgresql.org/).
 
 ### Binary
 
-Download the latest release from [GitHub](https://github.com/worldline-go/calendar/releases/latest)
+Download the latest release from [GitHub](https://github.com/rakunlabs/calendar/releases/latest)
 
 Extract it from archive and before to run, you need to have configuration file.
 

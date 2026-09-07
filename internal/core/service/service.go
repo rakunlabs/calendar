@@ -10,14 +10,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rakunlabs/query"
 	"github.com/worldline-go/cache"
 	"github.com/worldline-go/cache/store/memory"
-	"github.com/worldline-go/query"
 	"github.com/worldline-go/types"
 
-	"github.com/worldline-go/calendar/internal/core/port"
-	"github.com/worldline-go/calendar/pkg/ical"
-	"github.com/worldline-go/calendar/pkg/models"
+	"github.com/rakunlabs/calendar/internal/core/port"
+	"github.com/rakunlabs/calendar/pkg/ical"
+	"github.com/rakunlabs/calendar/pkg/models"
 )
 
 type CalendarService struct {

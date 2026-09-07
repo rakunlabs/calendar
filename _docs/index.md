@@ -17,4 +17,4 @@ Features:
 
 ---
 
-> For any update or problem, please create issues on [GitHub](https://github.com/worldline-go/calendar/issues)
+> For any update or problem, please create issues on [GitHub](https://github.com/rakunlabs/calendar/issues)

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/worldline-go/calendar/pkg/ical/special"
+	"github.com/rakunlabs/calendar/pkg/ical/special"
 )
 
 type Repeat struct {

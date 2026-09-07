@@ -15,13 +15,14 @@ release:
     Get the latest release with brew or binary:
 
     ```sh
-    # curl -fSL https://github.com/worldline-go/calendar/releases/latest/download/calendar_Linux_x86_64.tar.gz | tar -xz --overwrite -C ~/bin/ calendar
-    curl -fSL https://github.com/worldline-go/calendar/releases/download/{{ .Tag }}/calendar_Linux_x86_64.tar.gz | tar -xz --overwrite -C ~/bin/ calendar
+    # curl -fSL https://github.com/rakunlabs/calendar/releases/latest/download/calendar_Linux_x86_64.tar.gz | tar -xz --overwrite -C ~/bin/ calendar
+    curl -fSL https://github.com/rakunlabs/calendar/releases/download/{{ .Tag }}/calendar_Linux_x86_64.tar.gz | tar -xz --overwrite -C ~/bin/ calendar
     ```
   footer: |
-    **Full Changelog**: https://github.com/worldline-go/calendar/compare/{{ .PreviousTag }}...{{ .Tag }}
+    **Full Changelog**: https://github.com/rakunlabs/calendar/compare/{{ .PreviousTag }}...{{ .Tag }}
 before:
   hooks:
+    - make ui-build
     # You may remove this if you don't use go modules.
     - go mod tidy
 builds:
@@ -86,7 +87,7 @@ changelog:
 
 brews:
 - name: calendar
-  homepage: https://github.com/worldline-go/calendar
+  homepage: https://github.com/rakunlabs/calendar
   description: "swiss knife for services"
   repository:
     owner: brew-tools
@@ -96,14 +97,14 @@ brews:
 
 dockers:
 - image_templates:
-  - 'ghcr.io/worldline-go/calendar:{{ .Tag }}'
-  - 'ghcr.io/worldline-go/calendar:{{ .Tag }}-alpine'
-  - 'ghcr.io/worldline-go/calendar:{{ .Tag }}-alpine3.21.3'
-  - 'ghcr.io/worldline-go/calendar:latest'
+  - 'ghcr.io/rakunlabs/calendar:{{ .Tag }}'
+  - 'ghcr.io/rakunlabs/calendar:{{ .Tag }}-alpine'
+  - 'ghcr.io/rakunlabs/calendar:{{ .Tag }}-alpine3.21.3'
+  - 'ghcr.io/rakunlabs/calendar:latest'
   dockerfile: ci/alpine.Dockerfile
   build_flag_templates:
   - "--pull"
-  - "--label=io.artifacthub.package.readme-url=https://raw.githubusercontent.com/worldline-go/calendar/main/README.md"
+  - "--label=io.artifacthub.package.readme-url=https://raw.githubusercontent.com/rakunlabs/calendar/main/README.md"
   - "--label=io.artifacthub.package.maintainers=[{\"name\":\"Eray Ates\",\"email\":\"eates23@gmail.com\"}]"
   - "--label=io.artifacthub.package.license=MIT"
   - "--label=org.opencontainers.image.description=calendar service"

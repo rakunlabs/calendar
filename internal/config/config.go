@@ -5,11 +5,11 @@ import (
 	"fmt"
 
 	"github.com/rakunlabs/chu"
-	"github.com/worldline-go/logz"
-	"github.com/worldline-go/tell"
+	"github.com/rakunlabs/logi"
+	"github.com/rakunlabs/tell"
 
-	_ "github.com/rakunlabs/chu/loader/loaderconsul"
-	_ "github.com/rakunlabs/chu/loader/loadervault"
+	_ "github.com/rakunlabs/chu/loader/external/loaderconsul"
+	_ "github.com/rakunlabs/chu/loader/external/loadervault"
 )
 
 var (
@@ -30,7 +30,7 @@ type Config struct {
 
 	Migrate Migrate `cfg:"migrate"`
 
-	Telemetry tell.Config
+	Telemetry tell.Config `cfg:"telemetry"`
 }
 
 // Migrate contains database connection to run the migrations.
@@ -44,11 +44,11 @@ type Migrate struct {
 func Load(ctx context.Context) (*Config, error) {
 	cfg := &Config{}
 
-	if err := chu.Load(ctx, ServiceName, cfg, chu.WithLogger(logz.Log())); err != nil {
+	if err := chu.Load(ctx, ServiceName, cfg, chu.WithVersion(ServiceVersion)); err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 
-	if err := logz.SetLogLevel(cfg.LogLevel); err != nil {
+	if err := logi.SetLogLevel(cfg.LogLevel); err != nil {
 		return nil, fmt.Errorf("parse log level %s: %w", cfg.LogLevel, err)
 	}
 

@@ -1,21 +1,21 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/rakunlabs/ada"
+	"github.com/rakunlabs/ada/utils/bind"
 
-	"github.com/worldline-go/query"
-	"github.com/worldline-go/rest"
-	"github.com/worldline-go/rest/server"
+	"github.com/rakunlabs/query"
 	"github.com/worldline-go/types"
 
-	"github.com/worldline-go/calendar/internal/core/port"
-	"github.com/worldline-go/calendar/pkg/ical"
-	"github.com/worldline-go/calendar/pkg/models"
+	"github.com/rakunlabs/calendar/internal/core/port"
+	"github.com/rakunlabs/calendar/pkg/ical"
+	"github.com/rakunlabs/calendar/pkg/models"
 )
 
 type HTTP struct {
@@ -120,14 +120,16 @@ func NewHTTP(svc port.CalendarService) (*HTTP, error) {
 	}, nil
 }
 
-func (h *HTTP) RegisterRoutes(g *echo.Group) {
+func (h *HTTP) RegisterRoutes(g *ada.Mux) {
+	g.ErrorHandler(HTTPErrorHandler)
 	g.GET("/events", h.GetEvents)
+	g.GET("/occurrences", h.Occurrences)
 	g.POST("/events", h.AddEvents)
 	g.DELETE("/events", h.DeleteEvents)
 
-	g.GET("/events/:id", h.GetEvent)
-	g.DELETE("/events/:id", h.DeleteEvent)
-	g.PUT("/events/:id", h.PutEvent)
+	g.GET("/events/{id}", h.GetEvent)
+	g.DELETE("/events/{id}", h.DeleteEvent)
+	g.PUT("/events/{id}", h.PutEvent)
 
 	g.GET("/relations", h.GetRelations)
 	g.POST("/relations", h.AddRelations)
@@ -148,36 +150,36 @@ func (h *HTTP) RegisterRoutes(g *echo.Group) {
 // @Param disabled query bool false "disabled"
 // @Param limit query int false "limit" default(25)
 // @Param offset query int false "offset"
-// @Success 200 {object} rest.Response[[]models.Event]
-// @Failure 400 {object} rest.ResponseMessage
-// @Failure 500 {object} rest.ResponseMessage
+// @Success 200 {object} Response[[]models.Event]
+// @Failure 400 {object} ResponseMessage
+// @Failure 500 {object} ResponseMessage
 // @Router /events [get]
 // @Tags Events
-func (h *HTTP) GetEvents(c echo.Context) error {
-	q, err := query.ParseWithValidator(
-		c.QueryString(),
+func (h *HTTP) GetEvents(c *ada.Context) error {
+	q, err := parseQuery(
+		c.Request.URL.RawQuery,
 		h.Validator.GetEvents,
 		query.WithDefaultLimit(DefaultLimit),
 	)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return ada.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	events, err := h.Service.GetEvents(c.Request().Context(), q)
+	events, err := h.Service.GetEvents(c.Request.Context(), q)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err)
+		return responseError(http.StatusInternalServerError, err)
 	}
 	if len(events) == 0 {
-		return echo.NewHTTPError(http.StatusNotFound, "no events found")
+		return ada.NewHTTPError(http.StatusNotFound, "no events found")
 	}
 
-	count, err := h.Service.GetEventsCount(c.Request().Context(), q)
+	count, err := h.Service.GetEventsCount(c.Request.Context(), q)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "events count failed").SetInternal(err)
+		return &ada.HTTPError{Code: http.StatusInternalServerError, Message: "events count failed", Err: err}
 	}
 
-	return c.JSON(http.StatusOK, rest.Response[[]models.Event]{
-		Meta: &rest.Meta{
+	return c.SendJSON(Response[[]models.Event]{
+		Meta: &Meta{
 			TotalItemCount: count,
 			Limit:          q.GetLimit(),
 			Offset:         q.GetOffset(),
@@ -188,24 +190,25 @@ func (h *HTTP) GetEvents(c echo.Context) error {
 
 // @Summary AddEvents
 // @Description AddEvents
+// @Accept json
 // @Param body body []models.Event true "Event"
-// @Success 200 {object} rest.Response[[]string]
-// @Failure 400 {object} rest.ResponseMessage
-// @Failure 500 {object} rest.ResponseMessage
+// @Success 200 {object} Response[[]string]
+// @Failure 400 {object} ResponseMessage
+// @Failure 500 {object} ResponseMessage
 // @Router /events [post]
 // @Tags Events
-func (h *HTTP) AddEvents(c echo.Context) error {
+func (h *HTTP) AddEvents(c *ada.Context) error {
 	v := []models.Event{}
-	if err := rest.BindJSONList(c.Request().Body, &v); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err)
+	if err := c.Bind(&v, bind.WithJSONSingleAsSlice(true)); err != nil {
+		return responseError(http.StatusBadRequest, err)
 	}
 
-	updatedBy := server.GetUser(c)
+	updatedBy := c.Request.Header.Get("X-User")
 	for i := range v {
 		v[i].UpdatedBy = updatedBy
 	}
 
-	if err := h.Service.AddEvents(c.Request().Context(), v); err != nil {
+	if err := h.Service.AddEvents(c.Request.Context(), v); err != nil {
 		return err
 	}
 
@@ -214,8 +217,8 @@ func (h *HTTP) AddEvents(c echo.Context) error {
 		ids[i] = v[i].ID
 	}
 
-	return c.JSON(http.StatusOK, rest.Response[[]string]{
-		Message: &rest.Message{
+	return c.SendJSON(Response[[]string]{
+		Message: &Message{
 			Text: "Events added",
 		},
 		Payload: ids,
@@ -225,26 +228,26 @@ func (h *HTTP) AddEvents(c echo.Context) error {
 // @Summary GetEvent
 // @Description GetEvent
 // @Param id path string true "Event ID"
-// @Success 200 {object} rest.Response[models.Event]
-// @Failure 400 {object} rest.ResponseMessage
-// @Failure 500 {object} rest.ResponseMessage
+// @Success 200 {object} Response[models.Event]
+// @Failure 400 {object} ResponseMessage
+// @Failure 500 {object} ResponseMessage
 // @Router /events/{id} [get]
 // @Tags Events
-func (h *HTTP) GetEvent(c echo.Context) error {
-	id := c.Param("id")
+func (h *HTTP) GetEvent(c *ada.Context) error {
+	id := c.Request.PathValue("id")
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "missing event ID")
+		return ada.NewHTTPError(http.StatusBadRequest, "missing event ID")
 	}
 
-	event, err := h.Service.GetEvent(c.Request().Context(), id)
+	event, err := h.Service.GetEvent(c.Request.Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err)
+		return responseError(http.StatusInternalServerError, err)
 	}
 	if event == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "event not found")
+		return ada.NewHTTPError(http.StatusNotFound, "event not found")
 	}
 
-	return c.JSON(http.StatusOK, rest.Response[models.Event]{
+	return c.SendJSON(Response[models.Event]{
 		Payload: *event,
 	})
 }
@@ -252,18 +255,18 @@ func (h *HTTP) GetEvent(c echo.Context) error {
 // @Summary DeleteEvent
 // @Description DeleteEvent
 // @Param id path string true "Event ID"
-// @Success 200 {object} rest.ResponseMessage
-// @Failure 400 {object} rest.ResponseMessage
-// @Failure 500 {object} rest.ResponseMessage
+// @Success 200 {object} ResponseMessage
+// @Failure 400 {object} ResponseMessage
+// @Failure 500 {object} ResponseMessage
 // @Router /events/{id} [delete]
 // @Tags Events
-func (h *HTTP) DeleteEvent(c echo.Context) error {
-	id := c.Param("id")
+func (h *HTTP) DeleteEvent(c *ada.Context) error {
+	id := c.Request.PathValue("id")
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "missing event ID")
+		return ada.NewHTTPError(http.StatusBadRequest, "missing event ID")
 	}
 
-	if err := h.Service.RemoveEvent(c.Request().Context(), id); err != nil {
+	if err := h.Service.RemoveEvent(c.Request.Context(), id); err != nil {
 		return err
 	}
 
@@ -273,26 +276,26 @@ func (h *HTTP) DeleteEvent(c echo.Context) error {
 // @Summary DeleteEvents
 // @Description DeleteEvents for multiple events
 // @Param id query string true "Event ID"
-// @Success 200 {object} rest.ResponseMessage
-// @Failure 400 {object} rest.ResponseMessage
-// @Failure 500 {object} rest.ResponseMessage
+// @Success 200 {object} ResponseMessage
+// @Failure 400 {object} ResponseMessage
+// @Failure 500 {object} ResponseMessage
 // @Router /events [delete]
 // @Tags Events
-func (h *HTTP) DeleteEvents(c echo.Context) error {
-	q, err := query.ParseWithValidator(
-		c.QueryString(),
+func (h *HTTP) DeleteEvents(c *ada.Context) error {
+	q, err := parseQuery(
+		c.Request.URL.RawQuery,
 		h.Validator.DeleteEvents,
 	)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return ada.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
 	ids := q.GetValues("id")
 	if len(ids) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "missing event ID")
+		return ada.NewHTTPError(http.StatusBadRequest, "missing event ID")
 	}
 
-	if err := h.Service.RemoveEvent(c.Request().Context(), q.GetValues("id")...); err != nil {
+	if err := h.Service.RemoveEvent(c.Request.Context(), q.GetValues("id")...); err != nil {
 		return err
 	}
 
@@ -303,31 +306,31 @@ func (h *HTTP) DeleteEvents(c echo.Context) error {
 // @Description PutEvent
 // @Param id path string true "Event ID"
 // @Param body body models.Event true "Event"
-// @Success 200 {object} rest.ResponseMessage
-// @Failure 400 {object} rest.ResponseMessage
-// @Failure 500 {object} rest.ResponseMessage
+// @Success 200 {object} ResponseMessage
+// @Failure 400 {object} ResponseMessage
+// @Failure 500 {object} ResponseMessage
 // @Router /events/{id} [put]
 // @Tags Events
-func (h *HTTP) PutEvent(c echo.Context) error {
-	id := c.Param("id")
+func (h *HTTP) PutEvent(c *ada.Context) error {
+	id := c.Request.PathValue("id")
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "missing event ID")
+		return ada.NewHTTPError(http.StatusBadRequest, "missing event ID")
 	}
 
 	v := models.Event{}
-	if err := rest.BindJSON(c.Request().Body, &v); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err)
+	if err := json.NewDecoder(c.Request.Body).Decode(&v); err != nil {
+		return responseError(http.StatusBadRequest, err)
 	}
 
-	updatedBy := server.GetUser(c)
+	updatedBy := c.Request.Header.Get("X-User")
 	v.UpdatedBy = updatedBy
 
-	if err := h.Service.UpdateEvent(c.Request().Context(), id, &v); err != nil {
+	if err := h.Service.UpdateEvent(c.Request.Context(), id, &v); err != nil {
 		return err
 	}
 
-	return c.JSON(http.StatusOK, rest.ResponseMessage{
-		Message: &rest.Message{
+	return c.SendJSON(ResponseMessage{
+		Message: &Message{
 			Text: "Event updated",
 		},
 	})
@@ -339,33 +342,34 @@ func (h *HTTP) PutEvent(c echo.Context) error {
 
 // @Summary AddRelations
 // @Description AddRelations
+// @Accept json
 // @Param body body []models.Relation true "Relation"
-// @Success 200 {object} rest.ResponseMessage
-// @Failure 400 {object} rest.ResponseMessage
-// @Failure 500 {object} rest.ResponseMessage
+// @Success 200 {object} ResponseMessage
+// @Failure 400 {object} ResponseMessage
+// @Failure 500 {object} ResponseMessage
 // @Router /relations [post]
 // @Tags Relations
-func (h *HTTP) AddRelations(c echo.Context) error {
+func (h *HTTP) AddRelations(c *ada.Context) error {
 	v := []models.Relation{}
-	if err := rest.BindJSONList(c.Request().Body, &v); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err)
+	if err := c.Bind(&v, bind.WithJSONSingleAsSlice(true)); err != nil {
+		return responseError(http.StatusBadRequest, err)
 	}
 
-	updatedBy := server.GetUser(c)
+	updatedBy := c.Request.Header.Get("X-User")
 	for i := range v {
 		if v[i].Entity == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "missing entity")
+			return ada.NewHTTPError(http.StatusBadRequest, "missing entity")
 		}
 
 		v[i].UpdatedBy = updatedBy
 	}
 
-	if err := h.Service.AddRelations(c.Request().Context(), v); err != nil {
+	if err := h.Service.AddRelations(c.Request.Context(), v); err != nil {
 		return err
 	}
 
-	return c.JSON(http.StatusOK, rest.ResponseMessage{
-		Message: &rest.Message{
+	return c.SendJSON(ResponseMessage{
+		Message: &Message{
 			Text: "Relations added",
 		},
 	})
@@ -376,26 +380,26 @@ func (h *HTTP) AddRelations(c echo.Context) error {
 // @Param entity query string true "entity"
 // @Param event_id query string false "event_id"
 // @Param event_group query string false "event_group"
-// @Success 200 {object} rest.ResponseMessage
-// @Failure 400 {object} rest.ResponseMessage
-// @Failure 500 {object} rest.ResponseMessage
+// @Success 200 {object} ResponseMessage
+// @Failure 400 {object} ResponseMessage
+// @Failure 500 {object} ResponseMessage
 // @Router /relations [delete]
 // @Tags Relations
-func (h *HTTP) DeleteRelations(c echo.Context) error {
-	q, err := query.ParseWithValidator(
-		c.QueryString(),
+func (h *HTTP) DeleteRelations(c *ada.Context) error {
+	q, err := parseQuery(
+		c.Request.URL.RawQuery,
 		h.Validator.DeleteRelations,
 	)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return ada.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	if err := h.Service.RemoveRelation(c.Request().Context(), q); err != nil {
+	if err := h.Service.RemoveRelation(c.Request.Context(), q); err != nil {
 		return err
 	}
 
-	return c.JSON(http.StatusOK, rest.ResponseMessage{
-		Message: &rest.Message{
+	return c.SendJSON(ResponseMessage{
+		Message: &Message{
 			Text: "Relation removed",
 		},
 	})
@@ -409,32 +413,32 @@ func (h *HTTP) DeleteRelations(c echo.Context) error {
 // @Param sort query string false "sort"
 // @Param limit query int false "limit" default(25)
 // @Param offset query int false "offset"
-// @Success 200 {object} rest.Response[[]models.Relation]
-// @Failure 400 {object} rest.ResponseMessage
-// @Failure 500 {object} rest.ResponseMessage
+// @Success 200 {object} Response[[]models.Relation]
+// @Failure 400 {object} ResponseMessage
+// @Failure 500 {object} ResponseMessage
 // @Router /relations [get]
 // @Tags Relations
-func (h *HTTP) GetRelations(c echo.Context) error {
-	q, err := query.ParseWithValidator(c.QueryString(), h.Validator.GetRelations, query.WithDefaultLimit(DefaultLimit))
+func (h *HTTP) GetRelations(c *ada.Context) error {
+	q, err := parseQuery(c.Request.URL.RawQuery, h.Validator.GetRelations, query.WithDefaultLimit(DefaultLimit))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return ada.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	relations, err := h.Service.GetRelations(c.Request().Context(), q)
+	relations, err := h.Service.GetRelations(c.Request.Context(), q)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err)
+		return responseError(http.StatusInternalServerError, err)
 	}
 	if len(relations) == 0 {
-		return echo.NewHTTPError(http.StatusNotFound, "no relations found")
+		return ada.NewHTTPError(http.StatusNotFound, "no relations found")
 	}
 
-	count, err := h.Service.GetRelationsCount(c.Request().Context(), q)
+	count, err := h.Service.GetRelationsCount(c.Request.Context(), q)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err)
+		return responseError(http.StatusInternalServerError, err)
 	}
 
-	return c.JSON(http.StatusOK, rest.Response[[]models.Relation]{
-		Meta: &rest.Meta{
+	return c.SendJSON(Response[[]models.Relation]{
+		Meta: &Meta{
 			TotalItemCount: count,
 			Limit:          q.GetLimit(),
 			Offset:         q.GetOffset(),
@@ -450,31 +454,31 @@ func (h *HTTP) GetRelations(c echo.Context) error {
 // @Param entity query string false "entity for relation"
 // @Param event_group query string false "country for relation"
 // @Param date query string true "date specific event"
-// @Success 200 {object} rest.Response[[]models.Event]
-// @Failure 400 {object} rest.ResponseMessage
-// @Failure 500 {object} rest.ResponseMessage
+// @Success 200 {object} Response[[]models.Event]
+// @Failure 400 {object} ResponseMessage
+// @Failure 500 {object} ResponseMessage
 // @Router /holidays [get]
 // @Tags Search
-func (h *HTTP) Holidays(c echo.Context) error {
-	q, err := query.ParseWithValidator(
-		c.QueryString(),
+func (h *HTTP) Holidays(c *ada.Context) error {
+	q, err := parseQuery(
+		c.Request.URL.RawQuery,
 		h.Validator.GetEventsDate,
 		query.WithSkipExpressionCmp("date"),
 	)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return ada.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	events, err := h.Service.GetEvents(c.Request().Context(), q)
+	events, err := h.Service.GetEvents(c.Request.Context(), q)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err)
+		return responseError(http.StatusInternalServerError, err)
 	}
 	if len(events) == 0 {
-		return echo.NewHTTPError(http.StatusNotFound, "no events found")
+		return ada.NewHTTPError(http.StatusNotFound, "no events found")
 	}
 
-	return c.JSON(http.StatusOK, rest.Response[[]models.Event]{
-		Meta: &rest.Meta{
+	return c.SendJSON(Response[[]models.Event]{
+		Meta: &Meta{
 			TotalItemCount: uint64(len(events)),
 			Limit:          q.GetLimit(),
 			Offset:         q.GetOffset(),
@@ -489,45 +493,41 @@ func (h *HTTP) Holidays(c echo.Context) error {
 // @Param file formData file true "ICS file"
 // @Param event_group query string false "event_group for ics"
 // @Param tz query string false "timezone like Europe/Amsterdam default UTC"
-// @Success 200 {object} rest.ResponseMessage
-// @Failure 400 {object} rest.ResponseMessage
-// @Failure 500 {object} rest.ResponseMessage
+// @Success 200 {object} ResponseMessage
+// @Failure 400 {object} ResponseMessage
+// @Failure 500 {object} ResponseMessage
 // @Router /ics [post]
 // @Tags iCal
-func (h *HTTP) AddICS(c echo.Context) error {
+func (h *HTTP) AddICS(c *ada.Context) error {
 	var eventGroupNull types.Null[string]
-	if eventGroup := c.QueryParam("event_group"); eventGroup != "" {
+	if eventGroup := c.Request.URL.Query().Get("event_group"); eventGroup != "" {
 		eventGroupNull = types.NewNull(eventGroup)
 	}
 
-	file, err := c.FormFile("file")
+	src, _, err := c.Request.FormFile("file")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "failed to get file: "+err.Error())
+		return ada.NewHTTPError(http.StatusBadRequest, "failed to get file: "+err.Error())
 	}
 
-	src, err := file.Open()
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to open file: "+err.Error())
-	}
 	defer src.Close()
 
-	tz := strings.TrimSpace(c.QueryParam("tz"))
+	tz := strings.TrimSpace(c.Request.URL.Query().Get("tz"))
 	defaultTZ := time.UTC
 	if tz != "" {
 		loc, err := time.LoadLocation(tz)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid timezone: "+tz+" "+err.Error())
+			return ada.NewHTTPError(http.StatusBadRequest, "invalid timezone: "+tz+" "+err.Error())
 		}
 
 		defaultTZ = loc
 	}
 
-	if err := h.Service.AddIcal(c.Request().Context(), src, defaultTZ, eventGroupNull, server.GetUser(c)); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to add ICS: "+err.Error())
+	if err := h.Service.AddIcal(c.Request.Context(), src, defaultTZ, eventGroupNull, c.Request.Header.Get("X-User")); err != nil {
+		return ada.NewHTTPError(http.StatusInternalServerError, "failed to add ICS: "+err.Error())
 	}
 
-	return c.JSON(http.StatusOK, rest.ResponseMessage{
-		Message: &rest.Message{
+	return c.SendJSON(ResponseMessage{
+		Message: &Message{
 			Text: "ICS added",
 		},
 	})
@@ -538,24 +538,24 @@ func (h *HTTP) AddICS(c echo.Context) error {
 // @Param entity query string false "entity for relation"
 // @Param event_group query string false "country"
 // @Param year query string false "specific year events"
-// @Success 200 {object} rest.ResponseMessage
-// @Failure 400 {object} rest.ResponseMessage
-// @Failure 500 {object} rest.ResponseMessage
+// @Success 200 {object} ResponseMessage
+// @Failure 400 {object} ResponseMessage
+// @Failure 500 {object} ResponseMessage
 // @Router /ics [get]
 // @Tags iCal
-func (h *HTTP) GetICS(c echo.Context) error {
-	q, err := query.ParseWithValidator(
-		c.QueryString(),
+func (h *HTTP) GetICS(c *ada.Context) error {
+	q, err := parseQuery(
+		c.Request.URL.RawQuery,
 		h.Validator.GetICS,
 		query.WithSkipExpressionCmp("year"),
 	)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return ada.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	events, err := h.Service.GetEventsICS(c.Request().Context(), q)
+	events, err := h.Service.GetEventsICS(c.Request.Context(), q)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err)
+		return responseError(http.StatusInternalServerError, err)
 	}
 
 	// convert ics format
@@ -570,15 +570,9 @@ func (h *HTTP) GetICS(c echo.Context) error {
 
 	str, err := ical.GenerateICS(events, category)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err)
+		return responseError(http.StatusInternalServerError, err)
 	}
 
 	// send ics file
-	c.Response().Header().Set(echo.HeaderContentType, "text/calendar")
-	c.Response().Header().Set(echo.HeaderContentDisposition, "attachment; filename="+fileName+".ics")
-	c.Response().WriteHeader(http.StatusOK)
-
-	_, err = c.Response().Write([]byte(str))
-
-	return err
+	return c.SetHeader("Content-Type", "text/calendar", "Content-Disposition", "attachment; filename="+fileName+".ics").SendString(str)
 }

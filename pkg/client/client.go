@@ -3,20 +3,20 @@ package client
 import (
 	"fmt"
 
-	"github.com/worldline-go/klient"
+	"github.com/rakunlabs/ok"
 )
 
 type Calendar struct {
-	klient *klient.Client
+	client *ok.Client
 }
 
-func New(opts ...klient.OptionClientFn) (*Calendar, error) {
-	client, err := klient.New(opts...)
+func New(opts ...ok.OptionClientFn) (*Calendar, error) {
+	client, err := ok.New(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("provider client creation error=%w", err)
 	}
 
 	return &Calendar{
-		klient: client,
+		client: client,
 	}, nil
 }

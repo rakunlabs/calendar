@@ -8,11 +8,11 @@ import (
 	"github.com/doug-martin/goqu/v9"
 	"github.com/doug-martin/goqu/v9/exp"
 	"github.com/oklog/ulid/v2"
-	"github.com/worldline-go/query"
-	"github.com/worldline-go/query/adapter/adaptergoqu"
+	"github.com/rakunlabs/query"
+	"github.com/rakunlabs/query/adapter/adaptergoqu"
 	"github.com/worldline-go/types"
 
-	"github.com/worldline-go/calendar/pkg/models"
+	"github.com/rakunlabs/calendar/pkg/models"
 )
 
 type QeuryHoliday struct {
@@ -88,6 +88,7 @@ func (db *Database) getEventsSelect(q *query.Query) *goqu.SelectDataset {
 func (db *Database) GetEventsCount(ctx context.Context, q *query.Query) (uint64, error) {
 	var count uint64
 	_, err := db.getEventsSelect(q).
+		ClearOrder().ClearLimit().ClearOffset().
 		Select(goqu.COUNT(goqu.DISTINCT("id"))).
 		Executor().ScanValContext(ctx, &count)
 	if err != nil {
@@ -217,7 +218,7 @@ func (db *Database) RemoveRelation(ctx context.Context, q *query.Query) error {
 }
 
 func (db *Database) GetRelationsCount(ctx context.Context, q *query.Query) (uint64, error) {
-	count, err := adaptergoqu.Select(q, db.q.From(TableRelation)).CountContext(ctx)
+	count, err := adaptergoqu.Select(q, db.q.From(TableRelation)).ClearOrder().ClearLimit().ClearOffset().CountContext(ctx)
 	if err != nil {
 		return 0, err
 	}
