@@ -18,7 +18,7 @@ func TestMigrateDBEmptyDatasource(t *testing.T) {
 func TestMigrateDB(t *testing.T) {
 	container := containerpostgres.New(t)
 	defer container.Stop(t)
-	db := container.Sqlx()
+	db := container.Sql()
 
 	for _, version := range []int{0, 1, 2} {
 		t.Run(fmt.Sprintf("existing_version_%d", version), func(t *testing.T) {
@@ -65,19 +65,28 @@ func TestMigrateDB(t *testing.T) {
 			for range 2 {
 				require.NoError(t, MigrateDB(t.Context(), cfg))
 				var versions []int
-				require.NoError(t, db.Select(&versions, "SELECT version FROM "+history+" WHERE path = '/' ORDER BY version"))
+				rows, err := db.QueryContext(t.Context(), "SELECT version FROM "+history+" WHERE path = '/' ORDER BY version")
+				require.NoError(t, err)
+				defer rows.Close()
+				for rows.Next() {
+					var version int
+					require.NoError(t, rows.Scan(&version))
+					versions = append(versions, version)
+				}
+				require.NoError(t, rows.Err())
+				require.NoError(t, rows.Close())
 				require.Equal(t, []int{1, 2}, versions)
 				var count int
-				require.NoError(t, db.Get(&count, "SELECT count(*) FROM "+history))
+				require.NoError(t, db.QueryRowContext(t.Context(), "SELECT count(*) FROM "+history).Scan(&count))
 				require.Equal(t, 2, count)
-				require.NoError(t, db.Get(&count, "SELECT count(*) FROM "+quotedSchema+".calendar_events"))
-				require.NoError(t, db.Get(&count, "SELECT count(*) FROM "+quotedSchema+".calendar_relations"))
+				require.NoError(t, db.QueryRowContext(t.Context(), "SELECT count(*) FROM "+quotedSchema+".calendar_events").Scan(&count))
+				require.NoError(t, db.QueryRowContext(t.Context(), "SELECT count(*) FROM "+quotedSchema+".calendar_relations").Scan(&count))
 				if version > 0 {
 					var comment string
-					require.NoError(t, db.Get(&comment, `SELECT col_description($1::regclass, attnum) FROM pg_attribute WHERE attrelid = $1::regclass AND attname = 'rrule'`, schema+".calendar_events"))
+					require.NoError(t, db.QueryRowContext(t.Context(), `SELECT col_description($1::regclass, attnum) FROM pg_attribute WHERE attrelid = $1::regclass AND attname = 'rrule'`, schema+".calendar_events").Scan(&comment))
 					require.Equal(t, "do not replay", comment)
 					var migratedOn time.Time
-					require.NoError(t, db.Get(&migratedOn, "SELECT migrated_on FROM "+history+" WHERE path = '/' AND version = 1"))
+					require.NoError(t, db.QueryRowContext(t.Context(), "SELECT migrated_on FROM "+history+" WHERE path = '/' AND version = 1").Scan(&migratedOn))
 					require.True(t, migratedOn.Equal(time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)))
 				}
 			}

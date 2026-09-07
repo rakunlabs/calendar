@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -9,7 +10,6 @@ import (
 	"github.com/doug-martin/goqu/v9"
 	_ "github.com/doug-martin/goqu/v9/dialect/postgres"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/jmoiron/sqlx"
 
 	"github.com/rakunlabs/calendar/internal/config"
 )
@@ -26,8 +26,12 @@ type Database struct {
 
 // New attempts to connect to database server and returns a new Database instance.
 func New(ctx context.Context, cfg *config.Config) (*Database, error) {
-	db, err := sqlx.ConnectContext(ctx, cfg.DBType, cfg.DBDataSource)
+	db, err := sql.Open(cfg.DBType, cfg.DBDataSource)
 	if err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+	if err := db.PingContext(ctx); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
@@ -38,7 +42,7 @@ func New(ctx context.Context, cfg *config.Config) (*Database, error) {
 	return newDB(db, cfg.DBSchema), nil
 }
 
-func newDB(db *sqlx.DB, schema string) *Database {
+func newDB(db *sql.DB, schema string) *Database {
 	setSchema(schema)
 
 	return &Database{

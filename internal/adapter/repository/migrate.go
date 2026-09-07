@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jmoiron/sqlx"
 	"github.com/rakunlabs/muz"
 
 	"github.com/rakunlabs/calendar/internal/config"
@@ -24,12 +23,15 @@ func MigrateDB(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("migrate database datasource is empty")
 	}
 
-	db, err := sqlx.ConnectContext(ctx, cfg.Migrate.DBType, cfg.Migrate.DBDatasource)
+	db, err := sql.Open(cfg.Migrate.DBType, cfg.Migrate.DBDatasource)
 	if err != nil {
 		return fmt.Errorf("migrate database connect: %w", err)
 	}
 
 	defer db.Close()
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("migrate database connect: %w", err)
+	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {

@@ -26,7 +26,7 @@ func (s *DatabaseSuite) SetupSuite() {
 	s.container = containerpostgres.New(s.T())
 	s.container.ExecuteFiles(s.T(), migrations)
 
-	s.db = newDB(s.container.Sqlx(), "public")
+	s.db = newDB(s.container.Sql(), "public")
 }
 
 func TestDatabase(t *testing.T) {

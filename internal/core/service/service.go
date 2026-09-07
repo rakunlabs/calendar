@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rakunlabs/cache"
+	"github.com/rakunlabs/cache/store/memory"
 	"github.com/rakunlabs/query"
-	"github.com/worldline-go/cache"
-	"github.com/worldline-go/cache/store/memory"
 	"github.com/worldline-go/types"
 
 	"github.com/rakunlabs/calendar/internal/core/port"
@@ -32,7 +32,7 @@ var _ port.CalendarService = (*CalendarService)(nil)
 func NewCalendarService(ctx context.Context, db port.CalendarPort) (*CalendarService, error) {
 	cacheRule, err := cache.New[string, *ical.Repeat](ctx,
 		memory.Store,
-		cache.WithStoreConfig(memory.Config{
+		cache.WithStoreConfig(&memory.Config{
 			MaxItems: 200,
 			TTL:      30 * time.Minute,
 		}),
@@ -43,7 +43,7 @@ func NewCalendarService(ctx context.Context, db port.CalendarPort) (*CalendarSer
 
 	cacheTZ, err := cache.New[string, *time.Location](ctx,
 		memory.Store,
-		cache.WithStoreConfig(memory.Config{
+		cache.WithStoreConfig(&memory.Config{
 			MaxItems: 200,
 			TTL:      30 * time.Minute,
 		}),
