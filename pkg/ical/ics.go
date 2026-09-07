@@ -16,7 +16,7 @@ func GenerateICS(events []models.Event, category string) (string, error) {
 	var b strings.Builder
 	b.WriteString("BEGIN:VCALENDAR\r\n")
 	b.WriteString("VERSION:2.0\r\n")
-	b.WriteString("PRODID:-//worldline-go//calendar//EN\r\n")
+	b.WriteString("PRODID:-//rakunlabs//calendar//EN\r\n")
 
 	if category == "" {
 		category = "Holidays"

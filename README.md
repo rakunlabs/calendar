@@ -1,7 +1,7 @@
 # Calendar 🗓️
 
 [![License](https://img.shields.io/github/license/rakunlabs/calendar?color=blue&style=flat-square)](https://raw.githubusercontent.com/rakunlabs/calendar/main/LICENSE)
-[![Coverage](https://img.shields.io/sonar/coverage/worldline-go_calendar?logo=sonarcloud&server=https%3A%2F%2Fsonarcloud.io&style=flat-square)](https://sonarcloud.io/summary/overall?id=worldline-go_calendar)
+[![Coverage](https://img.shields.io/sonar/coverage/rakunlabs_calendar?logo=sonarcloud&server=https%3A%2F%2Fsonarcloud.io&style=flat-square)](https://sonarcloud.io/summary/overall?id=rakunlabs_calendar)
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/rakunlabs/calendar/test.yml?branch=main&logo=github&style=flat-square&label=ci)](https://github.com/rakunlabs/calendar/actions)
 [![Web](https://img.shields.io/badge/web-document-blueviolet?style=flat-square)](https://rakunlabs.github.io/calendar/)
 
