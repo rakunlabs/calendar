@@ -220,6 +220,11 @@ try {
   await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeVisible();
   await cancel();
   await chip.locator('..').locator('..').locator('.day-select').click();
+  if (process.env.SCREENSHOT_DIR) {
+    const dismiss = page.getByRole('button', { name: 'Dismiss notification' });
+    if (await dismiss.isVisible()) await dismiss.click();
+    await page.mouse.move(0, 0);
+  }
   for (const mode of ['Month', 'Day']) {
     await page.getByRole('button', { name: mode, exact: true }).click();
     for (const width of [1440, 1649, 1651, 1920, 390, 320]) {

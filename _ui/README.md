@@ -26,7 +26,7 @@ generation**. Dist is generated, not committed. Make targets and CI build it.
 
 ## Features
 
-- Month, day and year views, selected-day agenda and mini-calendar navigation.
+- Month, week, day and year views, selected-day agenda and mini-calendar navigation.
 - Create, edit and delete events; edits/deletions affect the entire recurring series.
 - Group filtering, search, all-day and timed events, and disabled event visibility.
 - Daily, weekly, monthly and yearly presets. Existing advanced RRULE/FUNC rules
