@@ -69,12 +69,13 @@ func (db *Database) getEventsSelect(q *query.Query) *goqu.SelectDataset {
 	selectDataSet := adaptergoqu.Select(q, db.q.From(TableEventsAs),
 		adaptergoqu.WithDefaultSelect(TableEventsStr+".*"),
 		adaptergoqu.WithRename(map[string]string{
-			"entity": TableRelationsStr + ".entity",
+			"entity":      TableRelationsStr + ".entity",
+			"event_group": TableEventsStr + ".event_group",
 		}),
 	).Distinct()
 
 	if q.HasAny("entity") {
-		selectDataSet = selectDataSet.RightJoin(TableRelationAs, goqu.On(
+		selectDataSet = selectDataSet.InnerJoin(TableRelationAs, goqu.On(
 			goqu.Or(
 				goqu.Ex{TableRelationsStr + ".event_id": goqu.I(TableEventsStr + ".id")},
 				goqu.Ex{TableRelationsStr + ".event_group": goqu.I(TableEventsStr + ".event_group")},

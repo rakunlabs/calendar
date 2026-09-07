@@ -1,6 +1,7 @@
 package ical
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strconv"
@@ -8,10 +9,7 @@ import (
 	"time"
 )
 
-// https://datatracker.ietf.org/doc/html/rfc5545
-
-// RRule represents a parsed RRULE according to RFC5545 section 3.3.10
-// Only common fields are included for brevity, but can be extended.
+// RRule represents an RFC5545 section 3.3.10 recurrence rule.
 type RRule struct {
 	Freq       string
 	Until      *time.Time
@@ -31,472 +29,204 @@ type RRule struct {
 	org string
 }
 
-func (r *RRule) Org() string {
-	return r.org
-}
+func (r *RRule) Org() string { return r.org }
 
-// ParseRRule parses an RRULE string into an RRule struct.
+// ParseRRule parses and validates an RRULE value, without the RRULE: prefix.
 func ParseRRule(s string) (*RRule, error) {
-	rule := &RRule{Interval: 1, org: s}
-	parts := strings.SplitSeq(s, ";")
-	for part := range parts {
-		if part == "" {
-			continue
+	r := &RRule{Interval: 1, org: s}
+	seen := map[string]bool{}
+	for part := range strings.SplitSeq(s, ";") {
+		key, val, ok := strings.Cut(part, "=")
+		key = strings.ToUpper(key)
+		if !ok || val == "" || seen[key] {
+			return nil, fmt.Errorf("invalid or duplicate RRULE part: %q", part)
 		}
-		kv := strings.SplitN(part, "=", 2)
-		if len(kv) != 2 {
-			return nil, fmt.Errorf("invalid RRULE part: %q", part)
-		}
-		key := strings.ToUpper(kv[0])
-		val := kv[1]
+		seen[key] = true
+		var list *[]int
 		switch key {
 		case "FREQ":
-			rule.Freq = strings.ToUpper(val)
+			r.Freq = strings.ToUpper(val)
 		case "UNTIL":
 			t, err := parseTime(val)
 			if err != nil {
 				return nil, fmt.Errorf("invalid UNTIL: %w", err)
 			}
-			rule.Until = &t
-		case "COUNT":
-			count, err := strconv.Atoi(val)
-			if err != nil {
-				return nil, fmt.Errorf("invalid COUNT: %w", err)
+			r.Until = &t
+		case "COUNT", "INTERVAL":
+			n, err := strconv.Atoi(val)
+			if err != nil || n < 1 || n > 2147483647 {
+				return nil, fmt.Errorf("invalid %s: %q", key, val)
 			}
-			rule.Count = &count
-		case "INTERVAL":
-			interval, err := strconv.Atoi(val)
-			if err != nil {
-				return nil, fmt.Errorf("invalid INTERVAL: %w", err)
+			if key == "COUNT" {
+				r.Count = &n
+			} else {
+				r.Interval = n
 			}
-			rule.Interval = interval
 		case "BYSECOND":
-			rule.BySecond = parseIntList(val)
+			list = &r.BySecond
 		case "BYMINUTE":
-			rule.ByMinute = parseIntList(val)
+			list = &r.ByMinute
 		case "BYHOUR":
-			rule.ByHour = parseIntList(val)
-		case "BYDAY":
-			rule.ByDay = strings.Split(val, ",")
+			list = &r.ByHour
 		case "BYMONTHDAY":
-			rule.ByMonthDay = parseIntList(val)
+			list = &r.ByMonthDay
 		case "BYYEARDAY":
-			rule.ByYearDay = parseIntList(val)
+			list = &r.ByYearDay
 		case "BYWEEKNO":
-			rule.ByWeekNo = parseIntList(val)
+			list = &r.ByWeekNo
 		case "BYMONTH":
-			rule.ByMonth = parseIntList(val)
+			list = &r.ByMonth
 		case "BYSETPOS":
-			rule.BySetPos = parseIntList(val)
+			list = &r.BySetPos
+		case "BYDAY":
+			r.ByDay = strings.Split(strings.ToUpper(val), ",")
 		case "WKST":
-			rule.Wkst = strings.ToUpper(val)
+			r.Wkst = strings.ToUpper(val)
 		default:
-			// ignore unknown keys for now
+			return nil, fmt.Errorf("unknown RRULE key: %q", key)
+		}
+		if list != nil {
+			for item := range strings.SplitSeq(val, ",") {
+				n, err := strconv.Atoi(item)
+				if err != nil {
+					return nil, fmt.Errorf("invalid %s value: %q", key, item)
+				}
+				*list = append(*list, n)
+			}
 		}
 	}
-	return rule, nil
+	if err := validateRRule(r); err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 
-func parseIntList(s string) []int {
-	if s == "" {
-		return nil
+// validateRRule also protects callers constructing rules directly. Interval zero
+// is the default for struct literals, but is rejected when explicitly parsed.
+func validateRRule(r *RRule) error {
+	if r == nil || !slices.Contains([]string{"SECONDLY", "MINUTELY", "HOURLY", "DAILY", "WEEKLY", "MONTHLY", "YEARLY"}, r.Freq) {
+		return fmt.Errorf("invalid RRULE frequency")
 	}
-	parts := strings.Split(s, ",")
-	res := make([]int, 0, len(parts))
-	for _, p := range parts {
-		i, err := strconv.Atoi(p)
-		if err == nil {
-			res = append(res, i)
+	if r.Interval < 0 || r.Interval > 2147483647 || r.Count != nil && (*r.Count < 1 || *r.Count > 2147483647) {
+		return fmt.Errorf("invalid RRULE interval or count")
+	}
+	if r.Count != nil && r.Until != nil {
+		return fmt.Errorf("RRULE COUNT and UNTIL are mutually exclusive")
+	}
+	for _, field := range []struct {
+		name     string
+		values   []int
+		min, max int
+		nonzero  bool
+	}{
+		{"BYSECOND", r.BySecond, 0, 60, false},
+		{"BYMINUTE", r.ByMinute, 0, 59, false},
+		{"BYHOUR", r.ByHour, 0, 23, false},
+		{"BYMONTHDAY", r.ByMonthDay, -31, 31, true},
+		{"BYYEARDAY", r.ByYearDay, -366, 366, true},
+		{"BYWEEKNO", r.ByWeekNo, -53, 53, true},
+		{"BYMONTH", r.ByMonth, 1, 12, false},
+		{"BYSETPOS", r.BySetPos, -366, 366, true},
+	} {
+		for _, n := range field.values {
+			if n < field.min || n > field.max || field.nonzero && n == 0 {
+				return fmt.Errorf("invalid %s value: %d", field.name, n)
+			}
 		}
 	}
-
-	return res
+	if r.Wkst != "" && !validWeekday(r.Wkst) {
+		return fmt.Errorf("invalid WKST: %q", r.Wkst)
+	}
+	for _, day := range r.ByDay {
+		if len(day) < 2 || !validWeekday(day[len(day)-2:]) {
+			return fmt.Errorf("invalid BYDAY: %q", day)
+		}
+		if len(day) > 2 {
+			ordinal := day[:len(day)-2]
+			digits := strings.TrimPrefix(strings.TrimPrefix(ordinal, "+"), "-")
+			n, err := strconv.Atoi(ordinal)
+			if err != nil || len(digits) > 2 || n == 0 || n < -53 || n > 53 {
+				return fmt.Errorf("invalid BYDAY ordinal: %q", day)
+			}
+			if r.Freq != "MONTHLY" && r.Freq != "YEARLY" || r.Freq == "YEARLY" && len(r.ByWeekNo) != 0 {
+				return fmt.Errorf("ordinal BYDAY requires MONTHLY or YEARLY without BYWEEKNO")
+			}
+		}
+	}
+	if len(r.ByWeekNo) != 0 && r.Freq != "YEARLY" {
+		return fmt.Errorf("BYWEEKNO requires YEARLY")
+	}
+	if len(r.ByYearDay) != 0 && slices.Contains([]string{"DAILY", "WEEKLY", "MONTHLY"}, r.Freq) {
+		return fmt.Errorf("BYYEARDAY is not valid with %s", r.Freq)
+	}
+	if len(r.ByMonthDay) != 0 && r.Freq == "WEEKLY" {
+		return fmt.Errorf("BYMONTHDAY is not valid with WEEKLY")
+	}
+	if len(r.BySetPos) != 0 && len(r.BySecond)+len(r.ByMinute)+len(r.ByHour)+len(r.ByDay)+len(r.ByMonthDay)+len(r.ByYearDay)+len(r.ByWeekNo)+len(r.ByMonth) == 0 {
+		return fmt.Errorf("BYSETPOS requires another BY rule part")
+	}
+	return nil
 }
 
-// parseTime parses RFC5545 date-time (UTC or local)
+func validWeekday(s string) bool {
+	return slices.Contains([]string{"SU", "MO", "TU", "WE", "TH", "FR", "SA"}, strings.ToUpper(s))
+}
+
+// parseTime parses RFC5545 UTC/local DATE-TIME or DATE values. Zone-less
+// values retain the UTC interpretation used by the former StrToROption path;
+// they are not reinterpreted in DTSTART's location during iteration.
 func parseTime(s string) (time.Time, error) {
-	// RFC5545 allows both DATE-TIME (with T and Z) and DATE (YYYYMMDD)
-	if strings.HasSuffix(s, "Z") {
+	if len(s) == 16 && strings.HasSuffix(s, "Z") {
 		return time.Parse("20060102T150405Z", s)
 	}
-
 	if len(s) == 8 {
 		return time.Parse("20060102", s)
 	}
-
-	return time.Parse("20060102T150405", s)
+	if len(s) == 15 {
+		return time.Parse("20060102T150405", s)
+	}
+	return time.Time{}, fmt.Errorf("invalid RFC5545 date/time: %q", s)
 }
 
-// nextFreq returns the next occurrence for the given freq and interval
-func nextFreq(t time.Time, freq string, interval int) time.Time {
-	if interval < 1 {
-		interval = 1
+// MatchRRuleAt finds an occurrence containing search in [start, end).
+// Invalid rules and iterator errors are reported as no match by this legacy API.
+func MatchRRuleAt(r *RRule, dtstart, dtend, search time.Time) (a, b time.Time, found bool) {
+	duration := dtend.Sub(dtstart)
+	if dtend.IsZero() || duration <= 0 {
+		return
 	}
-	switch freq {
-	case "DAILY":
-		return t.AddDate(0, 0, interval)
-	case "WEEKLY":
-		return t.AddDate(0, 0, 7*interval)
-	case "MONTHLY":
-		return t.AddDate(0, interval, 0)
-	case "YEARLY":
-		return t.AddDate(interval, 0, 0)
-	default:
-		return t.AddDate(0, 0, interval)
-	}
-}
-
-// MatchRRuleAt checks if the search time matches any occurrence of the RRule event.
-// Returns the start and stop time of the matching occurrence, and true if found.
-func MatchRRuleAt(rrule *RRule, dtstart, dtend, search time.Time) (time.Time, time.Time, bool) {
-	if rrule == nil || rrule.Freq == "" {
+	err := walkRRule(context.Background(), r, dtstart, search, func(candidate time.Time) bool {
+		end := candidate.Add(duration)
+		if !search.Before(candidate) && search.Before(end) {
+			a, b, found = candidate, end, true
+		}
+		return !found
+	})
+	if err != nil {
 		return time.Time{}, time.Time{}, false
 	}
-	start := dtstart
-	count := 0
-	maxCount := -1
-	if rrule.Count != nil {
-		maxCount = *rrule.Count
-	}
-	// Use a reasonable search window
-	until := search.AddDate(10, 0, 0)
-	if rrule.Until != nil && rrule.Until.Before(until) {
-		until = *rrule.Until
-	}
-	occ := start
-	duration := time.Duration(0)
-	if !dtend.IsZero() {
-		duration = dtend.Sub(dtstart)
-	}
-
-	for occ.Before(until) || occ.Equal(until) {
-		// Generate all candidates for the current period (for BYSETPOS)
-		candidates := generateCandidatesForPeriod(rrule, occ)
-		// Apply BYSETPOS if present
-		if len(rrule.BySetPos) > 0 {
-			candidates = filterBySetPos(candidates, rrule.BySetPos)
-		}
-		for _, candidate := range candidates {
-			occEnd := candidate
-			if duration > 0 {
-				occEnd = candidate.Add(duration)
-			}
-			// Check if search is within this occurrence
-			if !search.Before(candidate) && search.Before(occEnd) {
-				return candidate, occEnd, true
-			}
-			count++
-			if maxCount > 0 && count >= maxCount {
-				return time.Time{}, time.Time{}, false
-			}
-		}
-		occ = nextFreq(occ, rrule.Freq, rrule.Interval)
-	}
-
-	return time.Time{}, time.Time{}, false
+	return
 }
 
-// MatchRRuleBetween returns the first occurrence (start and end) between dateFrom and dateTo, and true if found.
-func MatchRRuleBetween(rrule *RRule, dtstart, dtend, dateFrom, dateTo time.Time) (time.Time, time.Time, bool) {
-	if rrule == nil || rrule.Freq == "" {
+// MatchRRuleBetween finds the first occurrence overlapping the inclusive range.
+// Invalid rules and iterator errors are reported as no match by this legacy API.
+func MatchRRuleBetween(r *RRule, dtstart, dtend, dateFrom, dateTo time.Time) (a, b time.Time, found bool) {
+	if dateFrom.After(dateTo) {
+		return
+	}
+	duration := time.Duration(0)
+	if !dtend.IsZero() && dtend.After(dtstart) {
+		duration = dtend.Sub(dtstart)
+	}
+	err := walkRRule(context.Background(), r, dtstart, dateTo, func(candidate time.Time) bool {
+		end := candidate.Add(duration)
+		if !end.Before(dateFrom) {
+			a, b, found = candidate, end, true
+		}
+		return !found
+	})
+	if err != nil {
 		return time.Time{}, time.Time{}, false
 	}
-
-	duration := time.Duration(0)
-	if !dtend.IsZero() {
-		duration = dtend.Sub(dtstart)
-	}
-
-	start := dtstart
-	count := 0
-	maxCount := -1
-	if rrule.Count != nil {
-		maxCount = *rrule.Count
-	}
-
-	until := dateTo
-	if rrule.Until != nil && rrule.Until.Before(until) {
-		until = *rrule.Until
-	}
-
-	occ := start
-	// Fast forward to the approximate first occurrence near dateFrom
-	for occ.Before(dateFrom) {
-		occ = nextFreq(occ, rrule.Freq, rrule.Interval)
-		count++
-		if maxCount > 0 && count >= maxCount {
-			return time.Time{}, time.Time{}, false
-		}
-	}
-	count = 0 // Reset count for actual iteration
-	for occ.Before(until) || occ.Equal(until) {
-		candidates := generateCandidatesForPeriod(rrule, occ)
-		if len(rrule.BySetPos) > 0 {
-			candidates = filterBySetPos(candidates, rrule.BySetPos)
-		}
-		for _, candidate := range candidates {
-			occEnd := candidate
-			if duration > 0 {
-				occEnd = candidate.Add(duration)
-			}
-			// Check if this occurrence overlaps with our date range
-			if (candidate.Before(dateTo) || candidate.Equal(dateTo)) &&
-				(occEnd.After(dateFrom) || occEnd.Equal(dateFrom)) {
-				return candidate, occEnd, true
-			}
-			count++
-			if maxCount > 0 && count >= maxCount {
-				return time.Time{}, time.Time{}, false
-			}
-		}
-		occ = nextFreq(occ, rrule.Freq, rrule.Interval)
-	}
-	return time.Time{}, time.Time{}, false
-}
-
-// generateCandidatesForPeriod generates all possible candidates for the current period (e.g., week or month), applying BYxxx rules except BYSETPOS.
-func generateCandidatesForPeriod(rrule *RRule, base time.Time) []time.Time {
-	var candidates []time.Time
-	freq := rrule.Freq
-	wkst := parseWkst(rrule.Wkst)
-	switch freq {
-	case "SECONDLY":
-		for i := range 60 {
-			candidate := time.Date(base.Year(), base.Month(), base.Day(), base.Hour(), base.Minute(), i, 0, base.Location())
-			if matchAllByRules(rrule, candidate) {
-				candidates = append(candidates, candidate)
-			}
-		}
-	case "MINUTELY":
-		for i := range 60 {
-			candidate := time.Date(base.Year(), base.Month(), base.Day(), base.Hour(), i, base.Second(), 0, base.Location())
-			if matchAllByRules(rrule, candidate) {
-				candidates = append(candidates, candidate)
-			}
-		}
-	case "HOURLY":
-		for i := range 24 {
-			candidate := time.Date(base.Year(), base.Month(), base.Day(), i, base.Minute(), base.Second(), 0, base.Location())
-			if matchAllByRules(rrule, candidate) {
-				candidates = append(candidates, candidate)
-			}
-		}
-	case "DAILY":
-		if matchAllByRules(rrule, base) {
-			candidates = append(candidates, base)
-		}
-	case "WEEKLY":
-		startOfWeek := startOfWeek(base, wkst)
-		for i := range 7 {
-			candidate := startOfWeek.AddDate(0, 0, i)
-			if candidate.Month() != base.Month() && base.Month() != 0 {
-				continue
-			}
-			if matchAllByRules(rrule, candidate) {
-				candidates = append(candidates, candidate)
-			}
-		}
-	case "MONTHLY":
-		if len(rrule.ByMonth) == 0 &&
-			len(rrule.ByMonthDay) == 0 &&
-			len(rrule.ByYearDay) == 0 &&
-			len(rrule.ByWeekNo) == 0 &&
-			len(rrule.ByDay) == 0 {
-			if matchAllByRules(rrule, base) {
-				candidates = append(candidates, base)
-			}
-			return candidates
-		}
-
-		first := time.Date(base.Year(), base.Month(), 1, base.Hour(), base.Minute(), base.Second(), base.Nanosecond(), base.Location())
-		daysInMonth := daysInMonth(base.Year(), base.Month())
-		for i := range daysInMonth {
-			candidate := first.AddDate(0, 0, i)
-			if matchAllByRules(rrule, candidate) {
-				candidates = append(candidates, candidate)
-			}
-		}
-	case "YEARLY":
-		if len(rrule.ByMonth) == 0 &&
-			len(rrule.ByMonthDay) == 0 &&
-			len(rrule.ByYearDay) == 0 &&
-			len(rrule.ByWeekNo) == 0 &&
-			len(rrule.ByDay) == 0 {
-			if matchAllByRules(rrule, base) {
-				candidates = append(candidates, base)
-			}
-			return candidates
-		}
-
-		first := time.Date(base.Year(), 1, 1, base.Hour(), base.Minute(), base.Second(), base.Nanosecond(), base.Location())
-		daysInYear := 365
-		if isLeapYear(base.Year()) {
-			daysInYear = 366
-		}
-		for i := range daysInYear {
-			candidate := first.AddDate(0, 0, i)
-			if matchAllByRules(rrule, candidate) {
-				candidates = append(candidates, candidate)
-			}
-		}
-	default:
-		if matchAllByRules(rrule, base) {
-			candidates = append(candidates, base)
-		}
-	}
-
-	return candidates
-}
-
-func isLeapYear(year int) bool {
-	return (year%4 == 0 && year%100 != 0) || (year%400 == 0)
-}
-
-// filterBySetPos filters candidates by BYSETPOS (1-based, negative for from end)
-func filterBySetPos(candidates []time.Time, setpos []int) []time.Time {
-	var filtered []time.Time
-	n := len(candidates)
-	for _, pos := range setpos {
-		idx := pos
-		if pos > 0 {
-			idx = pos - 1
-		} else if pos < 0 {
-			idx = n + pos
-		}
-		if idx >= 0 && idx < n {
-			filtered = append(filtered, candidates[idx])
-		}
-	}
-
-	return filtered
-}
-
-// parseWkst parses WKST (week start) string to time.Weekday, defaults to Monday
-func parseWkst(wkst string) time.Weekday {
-	switch strings.ToUpper(wkst) {
-	case "SU":
-		return time.Sunday
-	case "MO":
-		return time.Monday
-	case "TU":
-		return time.Tuesday
-	case "WE":
-		return time.Wednesday
-	case "TH":
-		return time.Thursday
-	case "FR":
-		return time.Friday
-	case "SA":
-		return time.Saturday
-	default:
-		return time.Monday
-	}
-}
-
-// startOfWeek returns the start of the week for a given time and week start
-func startOfWeek(t time.Time, wkst time.Weekday) time.Time {
-	delta := (int(t.Weekday()) - int(wkst) + 7) % 7
-
-	return t.AddDate(0, 0, -delta)
-}
-
-// daysInMonth returns the number of days in a month
-func daysInMonth(year int, month time.Month) int {
-	return time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
-}
-
-// matchAllByRules checks all BYxxx rules except BYSETPOS for a candidate
-func matchAllByRules(rrule *RRule, occ time.Time) bool {
-	if len(rrule.BySecond) > 0 {
-		if !slices.Contains(rrule.BySecond, occ.Second()) {
-			return false
-		}
-	}
-	if len(rrule.ByMinute) > 0 {
-		if !slices.Contains(rrule.ByMinute, occ.Minute()) {
-			return false
-		}
-	}
-	if len(rrule.ByHour) > 0 {
-		if !slices.Contains(rrule.ByHour, occ.Hour()) {
-			return false
-		}
-	}
-	if len(rrule.ByMonth) > 0 {
-		if !slices.Contains(rrule.ByMonth, int(occ.Month())) {
-			return false
-		}
-	}
-	if len(rrule.ByMonthDay) > 0 {
-		if !slices.Contains(rrule.ByMonthDay, occ.Day()) {
-			return false
-		}
-	}
-	if len(rrule.ByYearDay) > 0 {
-		if !slices.Contains(rrule.ByYearDay, occ.YearDay()) {
-			return false
-		}
-	}
-	if len(rrule.ByWeekNo) > 0 {
-		_, week := occ.ISOWeek()
-		if !slices.Contains(rrule.ByWeekNo, week) {
-			return false
-		}
-	}
-
-	if len(rrule.ByDay) > 0 {
-		found := false
-		wday := occ.Weekday().String()[:2]
-		for _, d := range rrule.ByDay {
-			if len(d) > 2 {
-				ord, day := d[:len(d)-2], d[len(d)-2:]
-				if strings.EqualFold(day, wday) {
-					ordInt, err := strconv.Atoi(ord)
-					if err == nil && nthWeekdayOfMonth(occ, ordInt) {
-						found = true
-						break
-					}
-				}
-			} else if strings.EqualFold(d, wday) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-
-	return true
-}
-
-// nthWeekdayOfMonth checks if t is the nth weekday of its month (e.g., 2nd Monday, -1 Sunday)
-func nthWeekdayOfMonth(t time.Time, n int) bool {
-	weekday := t.Weekday()
-	first := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
-	last := time.Date(t.Year(), t.Month()+1, 0, 0, 0, 0, 0, t.Location())
-
-	if n > 0 {
-		count := 0
-		for d := first; d.Month() == t.Month(); d = d.AddDate(0, 0, 1) {
-			if d.Weekday() == weekday {
-				count++
-				if count == n && d.Day() == t.Day() {
-					return true
-				}
-			}
-		}
-	} else if n < 0 {
-		count := 0
-		for d := last; d.Month() == t.Month(); d = d.AddDate(0, 0, -1) {
-			if d.Weekday() == weekday {
-				count--
-				if count == n && d.Day() == t.Day() {
-					return true
-				}
-			}
-		}
-	}
-
-	return false
+	return
 }

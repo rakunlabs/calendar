@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/rakunlabs/calendar/pkg/models"
-	rrule "github.com/teambition/rrule-go"
 	"github.com/worldline-go/types"
 )
 
@@ -55,32 +54,19 @@ func Occurrences(ctx context.Context, event models.Event, from, to time.Time) ([
 		if rule.Interval < 1 || rule.Count != nil && *rule.Count < 1 {
 			return nil, fmt.Errorf("event %s: recurrence interval and count must be positive", event.ID)
 		}
-		options, err := rrule.StrToROption(rule.Org())
-		if err != nil {
-			return nil, fmt.Errorf("event %s recurrence: %w", event.ID, err)
-		}
-		options.Dtstart = start
-		expander, err := rrule.NewRRule(*options)
-		if err != nil {
-			return nil, fmt.Errorf("event %s recurrence: %w", event.ID, err)
-		}
-		next := expander.Iterator()
-		for steps := 0; ; steps++ {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			if steps >= 100000 {
-				return nil, fmt.Errorf("event %s: recurrence exceeds expansion limit", event.ID)
-			}
-			candidate, ok := next()
-			if !ok || !candidate.Before(to) {
-				break
+		err := walkRRule(ctx, rule, start, to, func(candidate time.Time) bool {
+			if !candidate.Before(to) {
+				return false
 			}
 			stop := candidate.Add(duration)
 			if event.AllDay && dayCount > 0 {
 				stop = candidate.AddDate(0, 0, dayCount)
 			}
 			appendOccurrence(candidate, stop)
+			return true
+		})
+		if err != nil {
+			return nil, fmt.Errorf("event %s recurrence: %w", event.ID, err)
 		}
 	}
 	for _, fn := range repeat.Func {

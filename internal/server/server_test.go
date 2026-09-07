@@ -228,10 +228,8 @@ func TestBindingAndIdentity(t *testing.T) {
 		{"absent user", "POST", "/events", `{"updated_by":"spoof"}`, "", 1, `{"message":{"text":"Events added"},"payload":[""]}`},
 		{"put trailing JSON", "PUT", "/events/path-id", `{"id":"body-id","updated_by":"spoof"} {}`, "alice", 1, `{"message":{"text":"Event updated"}}`},
 		{"put null", "PUT", "/events/path-id", `null`, "alice", 1, `{"message":{"text":"Event updated"}}`},
-		{"relation object", "POST", "/relations", `{"entity":"a","updated_by":"spoof"}`, "alice", 1, `{"message":{"text":"Relations added"}}`},
-		{"relation list", "POST", "/relations", `[{"entity":"a"},{"entity":"b"}]`, "alice", 2, `{"message":{"text":"Relations added"}}`},
-		{"relation empty", "POST", "/relations", `[]`, "alice", 0, `{"message":{"text":"Relations added"}}`},
-		{"relation null", "POST", "/relations", `null`, "alice", 0, `{"message":{"text":"Relations added"}}`},
+		{"relation object", "POST", "/relations", `{"entity":"a","event_group":"g","updated_by":"spoof"}`, "alice", 1, `{"message":{"text":"Relations added"}}`},
+		{"relation list", "POST", "/relations", `[{"entity":"a","event_group":"g"},{"entity":"b","event_id":"e"}]`, "alice", 2, `{"message":{"text":"Relations added"}}`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &fakeService{}
@@ -272,7 +270,7 @@ func TestListBindingContentType(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`[]`))
+				r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`[{"entity":"a","event_group":"g"}]`))
 				if contentType != "" {
 					r.Header.Set("Content-Type", contentType)
 				}
@@ -292,6 +290,9 @@ func TestListBindingContentType(t *testing.T) {
 
 func TestQueryValidation(t *testing.T) {
 	for _, tt := range []struct{ method, path, body string }{
+		{"POST", "/relations", "[]"},
+		{"POST", "/relations", "null"},
+		{"POST", "/relations", `{"entity":"a"}`},
 		{"GET", "/events?unknown=value", ""},
 		{"GET", "/events?_fields=id", ""},
 		{"DELETE", "/events", ""},

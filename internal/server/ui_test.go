@@ -23,12 +23,12 @@ func TestEmbeddedUI(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `<div id="app">`) || w.Header().Get("Cache-Control") != "no-cache" {
 		t.Fatalf("UI response: %d %v %s", w.Code, w.Header(), w.Body)
 	}
-	asset := regexp.MustCompile(`src="(/calendar/assets/[^" ]+\.js)"`).FindStringSubmatch(w.Body.String())
+	asset := regexp.MustCompile(`src="(\./assets/[^" ]+\.js)"`).FindStringSubmatch(w.Body.String())
 	if len(asset) != 2 {
 		t.Fatal("built JS asset not found in embedded HTML")
 	}
 	w = httptest.NewRecorder()
-	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, asset[1], nil))
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/calendar/"+strings.TrimPrefix(asset[1], "./"), nil))
 	if w.Code != 200 || !strings.Contains(w.Header().Get("Cache-Control"), "immutable") {
 		t.Fatalf("asset: %d %v", w.Code, w.Header())
 	}

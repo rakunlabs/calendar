@@ -15,6 +15,7 @@ try {
   const writes = [];
   let fixtures = [];
   await page.route('**/v1/**', route => {
+    if (new URL(route.request().url()).pathname.endsWith('/relations')) return route.fulfill({ json: { payload: [] } });
     requests.push(route.request().url());
     if (route.request().method() === 'POST') {
       const saved = route.request().postDataJSON();
@@ -26,6 +27,15 @@ try {
   const base = `http://127.0.0.1:${server.httpServer.address().port}/calendar/`;
   await page.goto(base);
   await page.locator('.calendar-toolbar h1').waitFor();
+  for (const width of [1440, 1649, 1651, 1920]) {
+    await page.setViewportSize({ width, height: 1050 });
+    const surface = await page.locator('.calendar-surface').boundingBox();
+    const agenda = await page.locator('.agenda').boundingBox();
+    assert.equal(agenda.width, 247, `Empty agenda width at ${width}`);
+    assert.equal(agenda.height, surface.height, `Blank space below empty agenda at ${width}`);
+    assert.equal(await page.locator('.month-cell').first().evaluate(el => el.clientHeight), 109);
+  }
+  await page.setViewportSize({ width: 1440, height: 1050 });
   await expect(page.locator('.topbar').getByRole('button', { name: 'Create event', exact: true })).toHaveCount(0);
   await expect(page.getByText('Your calendar workspace', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'New event', exact: true }).click();
@@ -212,15 +222,20 @@ try {
   await chip.locator('..').locator('..').locator('.day-select').click();
   for (const mode of ['Month', 'Day']) {
     await page.getByRole('button', { name: mode, exact: true }).click();
-    for (const width of [1440, 390]) {
+    for (const width of [1440, 1649, 1651, 1920, 390, 320]) {
       await page.setViewportSize({ width, height: 900 });
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${mode} overflow at ${width}`);
+      assert(await page.locator('.agenda').evaluate(el => el.scrollWidth <= el.clientWidth), `${mode} agenda horizontal overflow at ${width}`);
+      if (mode === 'Month' && width >= 1440) {
+        assert.equal((await page.locator('.agenda').boundingBox()).width, 247);
+        assert.equal(await page.locator('.event-chip').first().evaluate(el => getComputedStyle(el).fontSize), '9px');
+      }
       if (process.env.SCREENSHOT_DIR)
         await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/calendar-${mode.toLowerCase()}-${width}.png`, fullPage: true });
     }
   }
   await page.getByRole('button', { name: 'Week', exact: true }).click();
-  for (const width of [1440, 768, 390, 320]) {
+  for (const width of [1440, 1649, 1651, 1920, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Overflow at ${width}`);
     if (process.env.SCREENSHOT_DIR && [1440, 390].includes(width))
@@ -255,7 +270,76 @@ try {
       message: `Day grid horizontal overflow at ${width}px (scrollWidth - clientWidth)`,
     }).toBeLessThanOrEqual(0);
   }
-  console.log('PASS: day/week slots, forward/reverse drag, keyboard/view focus, cancellation, month inclusive ranges/exclusive saves, date selection/event chips, mobile tap and overflow');
+  // Groups must include later catalog pages, even when no events occur in this view.
+  await page.setViewportSize({ width: 1440, height: 1050 });
+  fixtures = Array.from({ length: 20 }, (_, index) => ({
+    ...fixtures[0], id: `busy-${index}`, name: `Busy agenda ${index} ${'long-title'.repeat(8)}`,
+    description: 'Full notes remain available in the event editor. '.repeat(4),
+  }));
+  await page.getByRole('button', { name: 'Month', exact: true }).click();
+  await page.getByRole('button', { name: 'Refresh calendar', exact: true }).click();
+  await page.locator('.month-cell').filter({ has: page.locator('.event-chip') }).first().locator('.day-select').click();
+  await expect(page.locator('.agenda-event')).toHaveCount(20);
+  for (const width of [1440, 1649, 1651, 1920, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Busy agenda page overflow at ${width}`);
+    const agenda = await page.locator('.agenda').evaluate(el => {
+      el.scrollTop = el.scrollHeight;
+      return { horizontal: el.scrollWidth - el.clientWidth, height: el.clientHeight, scrollTop: el.scrollTop };
+    });
+    assert.equal(agenda.horizontal, 0, `Busy agenda horizontal overflow at ${width}`);
+    const row = page.locator('.agenda-event').first();
+    const rowBox = await row.boundingBox();
+    const timeBox = await row.locator('.agenda-time').boundingBox();
+    const titleBox = await row.locator('h3').boundingBox();
+    assert(rowBox.height >= 44 && rowBox.height <= 48, `Compact accessible row height at ${width}`);
+    assert(timeBox.x < titleBox.x, `Time precedes title at ${width}`);
+    assert(Math.abs(timeBox.y + timeBox.height / 2 - titleBox.y - titleBox.height / 2) < 2, `Time and title align at ${width}`);
+    await expect(row.locator('p')).toHaveCount(0);
+    if (width >= 1440) {
+      assert(agenda.height <= 740, `Busy agenda remains bounded at ${width}`);
+      assert(agenda.scrollTop > 0, `Busy agenda can scroll vertically at ${width}`);
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 1050 });
+  await page.locator('.agenda-event').first().focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByLabel('Notes', { exact: false })).toHaveValue(fixtures[0].description);
+  await cancel();
+  const buttonMargin = await page.locator('.new-event-sidebar').evaluate(el => getComputedStyle(el).margin);
+  assert.equal(buttonMargin, '8px 0px');
+  let catalogFails = true;
+  const catalog = Array.from({ length: 201 }, (_, index) => ({
+    id: String(index), name: `Catalog ${index}`, event_group: index === 200 ? 'Later page group' : 'Team',
+    date_from: '2020-01-01T00:00:00Z', date_to: '2020-01-02T00:00:00Z',
+    tz: 'UTC', all_day: true, rrule: '', disabled: index === 200, description: '',
+  }));
+  await page.unroute('**/v1/**');
+  await page.route('**/v1/**', route => {
+    const url = new URL(route.request().url());
+    requests.push(url.href);
+    if (url.pathname.endsWith('/relations')) return route.fulfill({ json: { payload: [] } });
+    if (url.pathname.endsWith('/occurrences')) return route.fulfill({ json: { payload: [] } });
+    if (catalogFails) return route.fulfill({ status: 503, json: { message: { text: 'Service unavailable.' } } });
+    const offset = Number(url.searchParams.get('_offset'));
+    const limit = Number(url.searchParams.get('_limit'));
+    return route.fulfill({ json: { payload: catalog.slice(offset, offset + limit) } });
+  });
+  await page.reload();
+  await expect(page.locator('.sidebar').getByRole('alert')).toContainText('Could not load groups');
+  await expect(page.getByText('Groups appear when you add your first event.')).toHaveCount(0);
+  await page.getByRole('button', { name: 'New event', exact: true }).click();
+  await expect(page.getByRole('dialog').getByRole('alert')).toContainText('Service unavailable.');
+  catalogFails = false;
+  await page.getByRole('dialog').getByRole('button', { name: 'Retry groups' }).click();
+  await expect(page.getByLabel('Calendar group', { exact: true }).locator('option')).toHaveCount(3);
+  await page.getByLabel('Calendar group', { exact: true }).selectOption('Later page group');
+  await expect(page.getByLabel('Calendar group', { exact: true })).toHaveValue('Later page group');
+  await cancel();
+  await expect(page.locator('.sidebar').getByRole('checkbox', { name: /Later page group/ })).toBeVisible();
+  assert(requests.some(url => url.includes('_offset=200')));
+  assert.deepEqual(errors, []);
+  console.log('PASS: calendar interactions/mobile overflow; paginated groups including disabled/out-of-range events, catalog failure and editor retry.');
 } finally {
   await browser?.close();
   await server.close();

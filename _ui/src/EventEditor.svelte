@@ -12,6 +12,9 @@
     hour,
     endDay,
     groups,
+    groupsLoading = false,
+    groupsError = '',
+    onretrygroups = () => {},
     onclose,
     onsaved,
   }: {
@@ -20,6 +23,9 @@
     hour?: number;
     endDay?: Date;
     groups: string[];
+    groupsLoading?: boolean;
+    groupsError?: string;
+    onretrygroups?: () => void;
     onclose: () => void;
     onsaved: (message: string) => void;
   } = $props();
@@ -61,8 +67,10 @@
   let name = $state(original?.name || '');
   let description = $state(original?.description || '');
   let group = $state(original?.event_group || '');
+  let newGroup = $state(false);
+  const groupOptions = $derived([...new Set([...groups, ...(group ? [group] : [])])].sort());
   let zone = $state(initialZone);
-  let allDay = $state(initialAllDay);
+  let allDayChoice = $state(initialAllDay);
   let disabled = $state(original?.disabled ?? false);
   const initialStartValue = original
     ? dateInput(original.date_from, initialZone, initialAllDay)
@@ -80,8 +88,26 @@
   let startTime = $state(initialAllDay ? '09:00' : initialStartValue.slice(11));
   let endDate = $state(initialEndValue.slice(0, 10));
   let endTime = $state(initialAllDay ? '10:00' : initialEndValue.slice(11));
-  const rules = ['', 'RRULE:FREQ=DAILY', 'RRULE:FREQ=WEEKLY', 'RRULE:FREQ=MONTHLY', 'RRULE:FREQ=YEARLY'];
+  // Names match pkg/ical/special/func.go; only exact presets replace an existing rule.
+  const specialDays = [
+    ['GOODFRIDAY', 'Good Friday'],
+    ['EASTERSUNDAY', 'Easter Sunday'],
+    ['EASTERMONDAY', 'Easter Monday'],
+    ['ASCENSIONDAY', 'Ascension Day'],
+    ['WHITSUNDAY', 'Whit Sunday'],
+    ['WHITMONDAY', 'Whit Monday'],
+  ];
+  const rules = [
+    '',
+    'RRULE:FREQ=DAILY',
+    'RRULE:FREQ=WEEKLY',
+    'RRULE:FREQ=MONTHLY',
+    'RRULE:FREQ=YEARLY',
+    ...specialDays.map(([name]) => `FUNC:${name}`),
+  ];
   let recurrence = $state(rules.includes(original?.rrule || '') ? original?.rrule || '' : 'custom');
+  const specialHoliday = $derived(recurrence.startsWith('FUNC:'));
+  const allDay = $derived(specialHoliday || allDayChoice);
   let author = $state('');
   let busy = $state(false);
   let error = $state('');
@@ -131,7 +157,7 @@
         endDate = startDate;
       }
     }
-    allDay = checked;
+    allDayChoice = checked;
   }
 
   async function submit(e: SubmitEvent) {
@@ -142,9 +168,13 @@
       if (!name.trim()) throw new Error('Give your event a name.');
       if (!startDate || !endDate || (!allDay && (!startTime || !endTime)))
         throw new Error('Choose a start and end date and time.');
-      if (allDay && endDate < startDate) throw new Error('The end date must be on or after the start date.');
+      if (allDay && !specialHoliday && endDate < startDate)
+        throw new Error('The end date must be on or after the start date.');
       const date_from = toInstant(allDay ? startDate : `${startDate}T${startTime}`, zone);
-      const date_to = toInstant(allDay ? shiftEditorDate(endDate, 1) : `${endDate}T${endTime}`, zone);
+      const date_to = toInstant(
+        allDay ? shiftEditorDate(specialHoliday ? startDate : endDate, 1) : `${endDate}T${endTime}`,
+        zone,
+      );
       if (date_to <= date_from) throw new Error('The end must be after the start.');
       busy = true;
       await saveEvent(
@@ -236,15 +266,37 @@
       />
       <div class="form-row">
         <div>
-          <label for="event-group">Calendar group</label><input
+          <label for="event-group">Calendar group</label><select
             id="event-group"
-            list="event-groups"
             bind:value={group}
-            placeholder="e.g. Team, Holidays"
-            disabled={busy}
-          /><datalist id="event-groups"
-            >{#each groups.filter((g) => g !== 'Ungrouped') as g}<option value={g}></option>{/each}</datalist
+            disabled={busy || newGroup}
+            aria-describedby="event-group-help"
           >
+            <option value="">No group</option>
+            {#each groupOptions as g}<option value={g}>{g}</option>{/each}
+          </select>
+          <label class="checkbox-label"
+            ><input type="checkbox" bind:checked={newGroup} disabled={busy} />Enter a group name</label
+          >
+          {#if newGroup}
+            <label for="event-new-group">Group name</label><input
+              id="event-new-group"
+              bind:value={group}
+              placeholder="e.g. Team, Holidays"
+              disabled={busy}
+            />
+          {/if}
+          <p class="field-hint" id="event-group-help">Choose an existing group or enter a new name.</p>
+          {#if groupsLoading}<p class="field-hint" role="status">Loading groups...</p>{/if}
+          {#if groupsError}<div class="error-message" role="alert">
+              Could not load groups. {groupsError}
+              <button
+                type="button"
+                class="secondary-button"
+                disabled={groupsLoading || busy}
+                onclick={onretrygroups}>Retry groups</button
+              >
+            </div>{/if}
         </div>
         <div>
           <label for="event-repeat">Repeat</label><select
@@ -254,20 +306,26 @@
             ><option value="">Does not repeat</option><option value="RRULE:FREQ=DAILY">Every day</option
             ><option value="RRULE:FREQ=WEEKLY">Every week</option><option value="RRULE:FREQ=MONTHLY"
               >Every month</option
-            ><option value="RRULE:FREQ=YEARLY">Every year</option
-            >{#if original?.rrule && !rules.includes(original.rrule)}<option value="custom"
+            ><option value="RRULE:FREQ=YEARLY">Every year</option><optgroup label="Special holidays (yearly)">
+              {#each specialDays as [name, label]}<option value={`FUNC:${name}`}>{label}</option>{/each}
+            </optgroup>{#if original?.rrule && !rules.includes(original.rrule)}<option value="custom"
                 >Keep existing rule</option
               >{/if}</select
           >
         </div>
       </div>
       {#if recurrence === 'custom'}<p class="field-hint rule-preview">{original?.rrule}</p>{/if}
+      {#if specialHoliday}<p class="field-hint" id="event-special-help">
+          Repeats annually for one full calendar day, from midnight to midnight on the selected holiday. The
+          dates below do not define the holiday date or duration; these are calculated each year.
+        </p>{/if}
       <label class="checkbox-label"
         ><input
           type="checkbox"
           checked={allDay}
           onchange={(e) => toggleAllDay(e.currentTarget.checked)}
-          disabled={busy}
+          disabled={busy || specialHoliday}
+          aria-describedby={specialHoliday ? 'event-special-help' : undefined}
         />All-day event</label
       >
       <div class="form-row">
@@ -278,7 +336,8 @@
             value={startDate}
             onchange={(e) => changeStart(e.currentTarget.value)}
             required
-            disabled={busy}
+            disabled={busy || specialHoliday}
+            aria-describedby={specialHoliday ? 'event-special-help' : undefined}
           />
           {#if !allDay}
             <label for="event-start-time">Start time</label><input
@@ -296,11 +355,16 @@
           <label for="event-end">End date</label><input
             id="event-end"
             type="date"
-            bind:value={endDate}
+            value={specialHoliday ? startDate : endDate}
+            onchange={(e) => (endDate = e.currentTarget.value)}
             min={startDate}
-            aria-describedby={allDay ? 'event-all-day-help' : undefined}
+            aria-describedby={specialHoliday
+              ? 'event-special-help'
+              : allDay
+                ? 'event-all-day-help'
+                : undefined}
             required
-            disabled={busy}
+            disabled={busy || specialHoliday}
           />
           {#if !allDay}
             <label for="event-end-time">End time</label><input
@@ -314,10 +378,12 @@
           {/if}
         </div>
       </div>
-      {#if allDay}<p class="field-hint" id="event-all-day-help">
+      {#if allDay && !specialHoliday}<p class="field-hint" id="event-all-day-help">
           Includes the end date. For a one-day event, use the same start and end date.
         </p>{/if}
-      <p class="field-hint">Changing the start moves the end to keep the same duration.</p>
+      {#if !specialHoliday}<p class="field-hint">
+          Changing the start moves the end to keep the same duration.
+        </p>{/if}
       <label for="event-zone">Time zone</label><select
         id="event-zone"
         bind:value={zone}

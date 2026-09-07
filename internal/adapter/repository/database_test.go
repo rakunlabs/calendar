@@ -1,9 +1,11 @@
 package repository
 
 import (
+	"net/url"
 	"testing"
 	"time"
 
+	"github.com/doug-martin/goqu/v9"
 	"github.com/rakunlabs/calendar/pkg/models"
 	"github.com/rakunlabs/query"
 	"github.com/stretchr/testify/suite"
@@ -14,6 +16,7 @@ import (
 var migrations = []string{
 	"migrations/01_events.sql",
 	"migrations/02_relations.sql",
+	"migrations/03_relation_uniqueness.sql",
 }
 
 type DatabaseSuite struct {
@@ -56,6 +59,106 @@ func (s *DatabaseSuite) TestCountIgnoresPaginationAndSort() {
 	count, err = s.db.GetRelationsCount(ctx, q)
 	s.Require().NoError(err)
 	s.Equal(uint64(2), count)
+}
+
+func (s *DatabaseSuite) TestRelationIdentityAndEventFiltering() {
+	ctx := s.T().Context()
+	entity, group := "R&D, (west)|other +%", "group, (one)&two"
+	start := time.Now()
+	events := []models.Event{
+		{ID: "relation-direct", Name: "direct", EventGroup: types.NewNull("elsewhere"), DateFrom: types.Time{Time: start}, DateTo: types.Time{Time: start.Add(time.Hour)}},
+		{ID: "relation-group", Name: "group", EventGroup: types.NewNull(group), DateFrom: types.Time{Time: start}, DateTo: types.Time{Time: start.Add(time.Hour)}},
+		{ID: "relation-unrelated", Name: "unrelated", EventGroup: types.NewNull("elsewhere"), DateFrom: types.Time{Time: start}, DateTo: types.Time{Time: start.Add(time.Hour)}},
+	}
+	s.Require().NoError(s.db.AddEvents(ctx, events))
+	defer s.db.RemoveEvent(ctx, events[0].ID, events[1].ID, events[2].ID)
+	relations := []models.Relation{
+		{Entity: entity, EventGroup: types.NewNull(group)},
+		{Entity: entity, EventID: types.NewNull(events[0].ID)},
+		{Entity: entity, EventGroup: types.NewNull(group), EventID: types.NewNull(events[0].ID)},
+		{Entity: "unmatched", EventGroup: types.NewNull("missing-group")},
+		{Entity: "other-entity", EventGroup: types.NewNull(group)},
+	}
+	for range 2 {
+		s.Require().NoError(s.db.AddRelations(ctx, relations))
+	}
+	q, err := query.Parse("", query.WithExpressionCmp("entity", query.NewExpressionCmp(query.OperatorEq, "entity", entity)))
+	s.Require().NoError(err)
+	defer s.db.RemoveRelation(ctx, q)
+	gotRelations, err := s.db.GetRelations(ctx, q)
+	s.Require().NoError(err)
+	s.Require().Len(gotRelations, 3)
+	got, err := s.db.GetEvents(ctx, q)
+	s.Require().NoError(err)
+	s.Require().Len(got, 2) // Group OR direct matches, deduplicated across rules.
+	filtered, err := query.Parse("", query.WithExpressionCmp("entity", query.NewExpressionCmp(query.OperatorEq, "entity", entity)),
+		query.WithExpressionCmp("event_group", query.NewExpressionCmp(query.OperatorEq, "event_group", group)))
+	s.Require().NoError(err)
+	got, err = s.db.GetEvents(ctx, filtered)
+	s.Require().NoError(err)
+	s.Require().Len(got, 1)
+	s.Equal(events[1].ID, got[0].ID)
+	count, err := s.db.GetEventsCount(ctx, filtered)
+	s.Require().NoError(err)
+	s.Equal(uint64(1), count)
+	unmatched, err := query.Parse("entity=unmatched")
+	s.Require().NoError(err)
+	got, err = s.db.GetEvents(ctx, unmatched)
+	s.Require().NoError(err)
+	s.Empty(got)
+
+	// Delete a group-only row, then an event-only row, without touching the
+	// combined rule or another entity's assignment to the same group.
+	for _, field := range []string{"event_group", "event_id"} {
+		value, nullField := group, "event_id"
+		if field == "event_id" {
+			value, nullField = events[0].ID, "event_group"
+		}
+		exact, err := query.Parse("", query.WithExpressionCmp("entity", query.NewExpressionCmp(query.OperatorEq, "entity", entity)),
+			query.WithExpressionCmp(field, query.NewExpressionCmp(query.OperatorEq, field, value)),
+			query.WithExpressionCmp(nullField, query.NewExpressionCmp(query.OperatorIs, nullField, nil)))
+		s.Require().NoError(err)
+		for range 2 {
+			s.Require().NoError(s.db.RemoveRelation(ctx, exact))
+		}
+	}
+	gotRelations, err = s.db.GetRelations(ctx, q)
+	s.Require().NoError(err)
+	s.Require().Len(gotRelations, 1)
+	s.True(gotRelations[0].EventGroup.Valid && gotRelations[0].EventID.Valid)
+	// Both-target rows retain their OR behavior after the individual rows go.
+	got, err = s.db.GetEvents(ctx, q)
+	s.Require().NoError(err)
+	s.Len(got, 2)
+	exact, err := query.Parse(url.Values{"entity[eq]": {entity}, "event_group[eq]": {group}, "event_id[eq]": {events[0].ID}}.Encode())
+	s.Require().NoError(err)
+	s.Require().NoError(s.db.RemoveRelation(ctx, exact))
+	gotRelations, err = s.db.GetRelations(ctx, q)
+	s.Require().NoError(err)
+	s.Empty(gotRelations)
+	other, err := query.Parse("entity=other-entity")
+	s.Require().NoError(err)
+	gotRelations, err = s.db.GetRelations(ctx, other)
+	s.Require().NoError(err)
+	s.Len(gotRelations, 1)
+	s.Require().NoError(s.db.RemoveRelation(ctx, other))
+	s.Require().NoError(s.db.RemoveRelation(ctx, unmatched))
+}
+
+func (s *DatabaseSuite) TestEventsNoDefaultLimit() {
+	ctx := s.T().Context()
+	start := time.Now()
+	events := make([]models.Event, 230)
+	for i := range events {
+		events[i] = models.Event{Name: "unpaginated", EventGroup: types.NewNull("unpaginated"), DateFrom: types.Time{Time: start}, DateTo: types.Time{Time: start.Add(time.Hour)}}
+	}
+	s.Require().NoError(s.db.AddEvents(ctx, events))
+	defer s.db.q.Delete(TableEvents).Where(goqu.Ex{"event_group": "unpaginated"}).Executor().ExecContext(ctx)
+	q, err := query.Parse("event_group[eq]=unpaginated")
+	s.Require().NoError(err)
+	got, err := s.db.GetEvents(ctx, q)
+	s.Require().NoError(err)
+	s.Len(got, len(events))
 }
 
 func (s *DatabaseSuite) TearDownSuite() {

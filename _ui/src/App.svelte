@@ -16,7 +16,7 @@
     SlidersHorizontal,
   } from '@lucide/svelte';
   import { addDays, addMonths, addYears, format, isSameDay, isSameMonth, startOfMonth } from 'date-fns';
-  import { getEvents, getOccurrences, type CalendarEvent } from './lib/api';
+  import { getEvents, getOccurrences, getRelations, type Relation, type CalendarEvent } from './lib/api';
   import {
     colorFor,
     dayKey,
@@ -32,6 +32,7 @@
   import EventEditor from './EventEditor.svelte';
   import TimeGrid from './TimeGrid.svelte';
   import ThemePicker from './ThemePicker.svelte';
+  import CalendarTools from './CalendarTools.svelte';
 
   const today = new Date();
   let selected = $state(new Date());
@@ -48,6 +49,12 @@
   let catalogError = $state('');
   let rangeError = $state('');
   let revision = $state(0);
+  let entity = $state('');
+  let relations = $state<Relation[]>([]);
+  let relationsLoading = $state(true);
+  let relationsError = $state('');
+  let toolsOpen = $state(false);
+  const entities = $derived([...new Set(relations.map(r => r.entity))].sort());
   let editor = $state<{ event: CalendarEvent | null; day: Date; hour?: number; endDay?: Date } | null>(null);
   let toast = $state('');
   let monthGrid = $state<HTMLDivElement>();
@@ -72,6 +79,9 @@
   }
 
   const groups = $derived([...new Set(templates.map(groupName))].sort());
+  const namedGroups = $derived(
+    [...new Set(templates.flatMap((event) => (event.event_group ? [event.event_group] : [])))].sort(),
+  );
   const days = $derived(monthDays(focus));
   const range = $derived(viewRange(focus, view));
   const filtered = $derived(
@@ -106,7 +116,7 @@
     catalogLoading = true;
     catalogError = '';
     getEvents(controller.signal)
-      .then((data) => (templates = data))
+      .then((data) => { if (!controller.signal.aborted) templates = data; })
       .catch((e) => {
         if (!controller.signal.aborted) catalogError = e.message;
       })
@@ -118,14 +128,26 @@
 
   $effect(() => {
     revision;
+    const controller = new AbortController();
+    relationsLoading = true;
+    relationsError = '';
+    getRelations(controller.signal)
+      .then(data => { if (!controller.signal.aborted) relations = data; })
+      .catch(e => { if (!controller.signal.aborted) relationsError = e.message; })
+      .finally(() => { if (!controller.signal.aborted) relationsLoading = false; });
+    return () => controller.abort();
+  });
+
+  $effect(() => {
+    revision;
     const [from, to] = range;
     // Include a day on either side for all-day events in distant time zones.
     const controller = new AbortController();
     loading = true;
     rangeError = '';
     occurrences = [];
-    getOccurrences(addDays(from, -1), addDays(to, 1), controller.signal)
-      .then((data) => (occurrences = data))
+    getOccurrences(addDays(from, -1), addDays(to, 1), controller.signal, entity)
+      .then((data) => { if (!controller.signal.aborted) occurrences = data; })
       .catch((e) => {
         if (!controller.signal.aborted) rangeError = e.message;
       })
@@ -212,7 +234,7 @@
   function saved(message: string) {
     editor = null;
     revision++;
-    notify(message);
+    notify(entity ? `${message} Only events assigned to ${entity} appear in this view.` : message);
   }
 </script>
 
@@ -220,7 +242,7 @@
 <svelte:window
   onkeydown={(e) => {
     if (e.key === 'Escape') monthSelection = null;
-    if (e.key === 'Escape' && filtersOpen && !editor) closeFilters();
+    if (e.key === 'Escape' && filtersOpen && !editor && !toolsOpen) closeFilters();
   }}
   onpointermove={moveMonthSelection}
   onpointerup={finishMonthSelection}
@@ -279,14 +301,31 @@
           >{/each}
       </div>
     </div>
+    <section class="entity-filter" aria-label="Entity filter">
+      <label for="calendar-entity">Entity</label>
+      <select id="calendar-entity" bind:value={entity} disabled={relationsLoading}>
+        <option value="">All entities</option>
+        {#each [...new Set([...entities, ...(entity ? [entity] : [])])] as name}<option value={name}>{name}</option>{/each}
+      </select>
+      {#if relationsLoading}<p class="sidebar-hint" role="status">Loading entities...</p>
+      {:else if relationsError}<p class="sidebar-hint" role="alert">{relationsError}</p><button class="secondary-button" onclick={() => revision++}>Retry entities</button>
+      {:else if !entities.length}<p class="sidebar-hint">No entities yet. Add an assignment in Calendar tools.</p>{/if}
+      {#if entity}<p class="sidebar-hint">New events may need an assignment to appear here. This filter does not restrict access.</p>{/if}
+      <button class="secondary-button tools-trigger" onclick={() => toolsOpen = true}>Calendar tools</button>
+    </section>
     <section class="calendar-groups" aria-labelledby="groups-heading">
       <div class="section-heading">
         <h2 id="groups-heading">My calendars</h2>
         <span>{groups.length}</span>
       </div>
-      {#if catalogLoading}<p class="sidebar-hint">Loading calendars…</p>{:else if groups.length === 0}<p
-          class="sidebar-hint"
-        >
+      <p class="sidebar-hint">Show or hide groups in this view only.</p>
+      {#if catalogLoading}<p class="sidebar-hint" role="status">
+          Loading calendars…
+        </p>{:else if catalogError}<div class="sidebar-hint" role="alert">
+          Could not load groups. <button class="secondary-button" onclick={() => revision++}
+            >Retry groups</button
+          >
+        </div>{:else if groups.length === 0}<p class="sidebar-hint">
           Groups appear when you add your first event.
         </p>{/if}
       {#each groups as group}<label class="group-filter"
@@ -534,23 +573,20 @@
               {#each selectedEvents as event}<button
                   class="agenda-event"
                   disabled={catalogLoading}
+                  title={`${event.name || 'Untitled event'} · ${groupName(event)} · ${event.all_day ? 'All day' : `${format(new Date(event.date_from), 'HH:mm')} – ${format(new Date(event.date_to), 'HH:mm')}`}`}
                   onclick={() => openEvent(event)}
-                  ><div class="agenda-event-meta">
-                    <span class={`group-pill event-color-${colorFor(groupName(event))}`}
-                      ><span class="event-dot"></span>{groupName(event)}</span
-                    >{#if event.rrule}<Repeat2 size={14} aria-label="Recurring event" />{/if}
-                  </div>
+                  ><span class="agenda-time"
+                    >{event.all_day ? 'All day' : format(new Date(event.date_from), 'HH:mm')}</span
+                  >
+                  <span class={`agenda-group event-color-${colorFor(groupName(event))}`} title={groupName(event)}
+                    ><span class="event-dot" aria-label={groupName(event)}></span></span
+                  >
                   <h3>{event.name || 'Untitled event'}</h3>
-                  <div class="agenda-time">
-                    <Clock3 size={13} /><span
-                      >{event.all_day
-                        ? 'All day'
-                        : `${format(new Date(event.date_from), 'HH:mm')} – ${format(new Date(event.date_to), 'HH:mm')}`}</span
-                    >{#if event.disabled}<span class="disabled-label">Disabled</span>{/if}
-                  </div>
-                  {#if event.description}<p>{event.description}</p>{/if}<span class="edit-event"
-                    >View & edit <ArrowUpRight size={13} /></span
-                  ></button
+                  <span class="agenda-event-meta">
+                    {#if event.rrule}<Repeat2 size={13} aria-label="Recurring event" />{/if}
+                    {#if event.disabled}<span class="disabled-label">Disabled</span>{/if}
+                    <ArrowUpRight size={13} aria-hidden="true" />
+                  </span></button
                 >{/each}
             </div>{/if}
           <button class="agenda-add" onclick={() => (editor = { event: null, day: selected })}
@@ -585,7 +621,16 @@
     day={editor.day}
     hour={editor.hour}
     endDay={editor.endDay}
-    {groups}
+    groups={namedGroups}
+    groupsLoading={catalogLoading}
+    groupsError={catalogError}
+    onretrygroups={() => revision++}
     onclose={() => (editor = null)}
     onsaved={saved}
   />{/if}
+{#if toolsOpen}<CalendarTools
+  {relations} {entities} events={templates} groups={namedGroups}
+  loading={catalogLoading || relationsLoading} error={catalogError || relationsError}
+  selectedEntity={entity} onretry={() => revision++} onchange={() => revision++}
+  onclose={() => toolsOpen = false}
+/>{/if}

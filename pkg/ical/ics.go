@@ -42,15 +42,15 @@ func GenerateICS(events []models.Event, category string) (string, error) {
 
 		from := e.DateFrom.Time
 		to := e.DateTo.Time
-
-		isAllDay := false
-		if e.AllDay {
-			isAllDay = from.Hour() == 0 && from.Minute() == 0 && from.Second() == 0 &&
-				to.Hour() == 0 && to.Minute() == 0 && to.Second() == 0 &&
-				to.Sub(from) == 24*time.Hour
+		if e.Tz != "" {
+			loc, err := time.LoadLocation(e.Tz)
+			if err != nil {
+				return "", fmt.Errorf("event %s timezone: %w", e.ID, err)
+			}
+			from, to = from.In(loc), to.In(loc)
 		}
 
-		if isAllDay {
+		if e.AllDay {
 			// All-day event: DTSTART/DTEND in DATE format (YYYYMMDD)
 			b.WriteString(fmt.Sprintf("DTSTART;VALUE=DATE:%s\r\n", from.Format("20060102")))
 			b.WriteString(fmt.Sprintf("DTEND;VALUE=DATE:%s\r\n", to.Format("20060102")))
@@ -69,8 +69,12 @@ func GenerateICS(events []models.Event, category string) (string, error) {
 			}
 		}
 
-		if e.RRule != "" {
-			b.WriteString(fmt.Sprintf("RRULE:%s\r\n", e.RRule))
+		if rule := strings.TrimSpace(e.RRule); rule != "" {
+			rule = strings.TrimPrefix(rule, "RRULE:")
+			if _, err := ParseRRule(rule); err != nil {
+				return "", fmt.Errorf("event %s recurrence must be a single RRULE (materialize FUNC before export): %w", e.ID, err)
+			}
+			b.WriteString(fmt.Sprintf("RRULE:%s\r\n", rule))
 		}
 		b.WriteString("TRANSP:TRANSPARENT\r\n")
 		b.WriteString("END:VEVENT\r\n")
@@ -88,33 +92,26 @@ func ParseICS(data io.Reader, tz *time.Location) ([]models.Event, error) {
 		defaultTZ = tz
 	}
 
-	reader := bufio.NewReader(data)
+	// Unfold before parsing, including RRULE continuations and a final line without LF.
+	scanner := bufio.NewScanner(data)
+	scanner.Buffer(make([]byte, 4096), 1024*1024)
+	var lines []string
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(lines) > 0 && (strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")) {
+			lines[len(lines)-1] += line[1:]
+		} else {
+			lines = append(lines, line)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read ics: %w", err)
+	}
 	var events []models.Event
 	var e models.Event
 	inEvent := false
 
-	var current string
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			if err != io.EOF {
-				return nil, fmt.Errorf("failed to read line: %w", err)
-			}
-
-			break
-		}
-
-		if strings.HasPrefix(line, " ") {
-			switch current {
-			case "DESCRIPTION":
-				e.Description += unescapeICS(strings.TrimSpace(line))
-			case "SUMMARY":
-				e.Name += unescapeICS(strings.TrimSpace(line))
-			}
-
-			continue
-		}
-
+	for _, line := range lines {
 		line = strings.TrimSpace(line)
 
 		if line == "" {
@@ -124,97 +121,103 @@ func ParseICS(data io.Reader, tz *time.Location) ([]models.Event, error) {
 		if line == "BEGIN:VEVENT" {
 			inEvent = true
 			e = models.Event{}
-			current = ""
 
 			continue
 		}
 		if line == "END:VEVENT" && inEvent {
 			inEvent = false
-			e.Tz = defaultTZ.String()
+			if e.DateFrom.IsZero() {
+				return nil, fmt.Errorf("event %s has missing or invalid DTSTART", e.ID)
+			}
+			e.Tz = e.DateFrom.Location().String()
 			if e.DateTo.Time.IsZero() {
+				if !e.AllDay {
+					return nil, fmt.Errorf("event %s: timed event requires DTEND", e.ID)
+				}
 				e.DateTo = types.Time{Time: e.DateFrom.AddDate(0, 0, 1)}
+			}
+			if !e.DateTo.After(e.DateFrom.Time) {
+				return nil, fmt.Errorf("event %s: DTEND must be after DTSTART", e.ID)
 			}
 
 			events = append(events, e)
-			current = ""
 
 			continue
 		}
 		if !inEvent {
-			current = ""
-
 			continue
 		}
 
 		if strings.HasPrefix(line, "UID:") {
 			e.ID = strings.TrimPrefix(line, "UID:")
-			current = "UID"
 		} else if strings.HasPrefix(line, "SUMMARY:") {
 			e.Name = unescapeICS(strings.TrimPrefix(line, "SUMMARY:"))
-			current = "SUMMARY"
 		} else if strings.HasPrefix(line, "SUMMARY;") {
 			e.Name = unescapeICS(strings.TrimPrefix(line, "SUMMARY;"))
-			current = "SUMMARY"
 		} else if strings.HasPrefix(line, "DESCRIPTION:") {
 			e.Description = unescapeICS(strings.TrimPrefix(line, "DESCRIPTION:"))
-			current = "DESCRIPTION"
 		} else if strings.HasPrefix(line, "DTSTART") {
-			current = ""
-			v := line[strings.Index(line, ":")+1:]
-			if strings.Contains(line, ";VALUE=DATE") {
-				e.DateFrom.Time = TimeParse("20060102", v, defaultTZ)
-				e.AllDay = true
-			} else if strings.Contains(line, "TZID=") {
-				tzidStart := strings.Index(line, "TZID=") + len("TZID=")
-				tzidEnd := strings.Index(line, ":")
-				if tzidEnd > tzidStart {
-					tzid := line[tzidStart:tzidEnd]
-					loc, err := time.LoadLocation(tzid)
-					if err == nil {
-						e.DateFrom.Time = TimeParse("20060102T150405", v, loc)
-					} else {
-						// Fallback to parsing as local if TZID is invalid
-						e.DateFrom.Time = TimeParse("20060102T150405", v, defaultTZ)
-					}
-				} else {
-					// Fallback to parsing as local if TZID is malformed
-					e.DateFrom.Time = TimeParse("20060102T150405", v, defaultTZ)
-				}
-			} else {
-				e.DateFrom.Time = TimeParse("20060102T150405Z", v, defaultTZ)
+			date, allDay, err := parseICSDate(line, defaultTZ)
+			if err != nil {
+				return nil, fmt.Errorf("event %s DTSTART: %w", e.ID, err)
 			}
+			e.DateFrom.Time, e.AllDay = date, allDay
 		} else if strings.HasPrefix(line, "DTEND") {
-			current = ""
-			v := line[strings.Index(line, ":")+1:]
-			if strings.Contains(line, ";VALUE=DATE") {
-				e.DateTo.Time = TimeParse("20060102", v, defaultTZ)
-				e.AllDay = true
-			} else if strings.Contains(line, "TZID=") {
-				tzidStart := strings.Index(line, "TZID=") + len("TZID=")
-				tzidEnd := strings.Index(line, ":")
-				if tzidEnd > tzidStart {
-					tzid := line[tzidStart:tzidEnd]
-					loc, err := time.LoadLocation(tzid)
-					if err == nil {
-						e.DateTo.Time = TimeParse("20060102T150405", v, loc)
-					} else {
-						// Fallback to parsing as local if TZID is invalid
-						e.DateTo.Time = TimeParse("20060102T150405", v, defaultTZ)
-					}
-				} else {
-					// Fallback to parsing as local if TZID is malformed
-					e.DateTo.Time = TimeParse("20060102T150405", v, defaultTZ)
-				}
-			} else {
-				e.DateTo.Time = TimeParse("20060102T150405Z", v, defaultTZ)
+			date, _, err := parseICSDate(line, defaultTZ)
+			if err != nil {
+				return nil, fmt.Errorf("event %s DTEND: %w", e.ID, err)
 			}
+			e.DateTo.Time = date
 		} else if strings.HasPrefix(line, "RRULE:") {
+			if e.RRule != "" {
+				return nil, fmt.Errorf("event %s has multiple RRULE properties", e.ID)
+			}
+			if _, err := ParseRRule(strings.TrimPrefix(line, "RRULE:")); err != nil {
+				return nil, fmt.Errorf("event %s recurrence: %w", e.ID, err)
+			}
 			e.RRule = line
-			current = ""
+		} else {
+			switch property := strings.SplitN(strings.SplitN(line, ":", 2)[0], ";", 2)[0]; property {
+			case "DURATION":
+				return nil, fmt.Errorf("event %s: unsupported DURATION property; use DTEND", e.ID)
+			case "EXDATE", "RDATE", "RECURRENCE-ID":
+				return nil, fmt.Errorf("event %s: unsupported recurrence property %s", e.ID, property)
+			}
 		}
 	}
 
 	return events, nil
+}
+
+func parseICSDate(line string, defaultTZ *time.Location) (time.Time, bool, error) {
+	property, value, ok := strings.Cut(line, ":")
+	if !ok {
+		return time.Time{}, false, fmt.Errorf("missing date value")
+	}
+	loc := defaultTZ
+	allDay := false
+	for _, param := range strings.Split(property, ";")[1:] {
+		key, val, _ := strings.Cut(param, "=")
+		val = strings.Trim(val, "\"")
+		switch key {
+		case "VALUE":
+			allDay = val == "DATE"
+		case "TZID":
+			var err error
+			loc, err = time.LoadLocation(val)
+			if err != nil {
+				return time.Time{}, false, err
+			}
+		}
+	}
+	layout := "20060102T150405"
+	if allDay {
+		layout, loc = "20060102", defaultTZ
+	} else if strings.HasSuffix(value, "Z") {
+		layout, loc = "20060102T150405Z", time.UTC
+	}
+	date, err := time.ParseInLocation(layout, value, loc)
+	return date, allDay, err
 }
 
 // escapeICS escapes special characters for ICS fields

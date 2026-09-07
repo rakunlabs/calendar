@@ -56,6 +56,20 @@ func TestMigrateDB(t *testing.T) {
 					_, err = tx.ExecContext(t.Context(), `INSERT INTO calendar_migrations (path, version, migrated_on) VALUES ('/', $1, '2020-01-01Z')`, i+1)
 					require.NoError(t, err)
 				}
+				if version == 2 {
+					_, err = tx.ExecContext(t.Context(), `
+						INSERT INTO calendar_events (id, name, date_from, date_to) VALUES ('e', 'event', NOW(), NOW());
+						INSERT INTO calendar_relations (entity, event_group, event_id, updated_at, updated_by) VALUES
+						('x', 'g', NULL, '2020-01-01Z', 'old'),
+						('x', 'g', NULL, '2026-01-01Z', 'latest'),
+						('x', 'g', NULL, NULL, 'unknown'),
+						('x', NULL, 'e', '2020-01-01Z', 'old'),
+						('x', NULL, 'e', '2026-01-01Z', 'latest'),
+						('x', NULL, NULL, '2020-01-01Z', 'old'),
+						('x', NULL, NULL, '2026-01-01Z', 'latest'),
+						('x', 'g', 'e', '2026-01-01Z', 'latest')`)
+					require.NoError(t, err)
+				}
 				// The shipped SQL is mostly idempotent; this comment detects replay.
 				_, err = tx.ExecContext(t.Context(), `COMMENT ON COLUMN calendar_events.rrule IS 'do not replay'`)
 				require.NoError(t, err)
@@ -75,12 +89,17 @@ func TestMigrateDB(t *testing.T) {
 				}
 				require.NoError(t, rows.Err())
 				require.NoError(t, rows.Close())
-				require.Equal(t, []int{1, 2}, versions)
+				require.Equal(t, []int{1, 2, 3}, versions)
 				var count int
 				require.NoError(t, db.QueryRowContext(t.Context(), "SELECT count(*) FROM "+history).Scan(&count))
-				require.Equal(t, 2, count)
+				require.Equal(t, 3, count)
 				require.NoError(t, db.QueryRowContext(t.Context(), "SELECT count(*) FROM "+quotedSchema+".calendar_events").Scan(&count))
 				require.NoError(t, db.QueryRowContext(t.Context(), "SELECT count(*) FROM "+quotedSchema+".calendar_relations").Scan(&count))
+				if version == 2 {
+					require.Equal(t, 4, count)
+					require.NoError(t, db.QueryRowContext(t.Context(), "SELECT count(*) FROM "+quotedSchema+".calendar_relations WHERE updated_by = 'latest'").Scan(&count))
+					require.Equal(t, 4, count)
+				}
 				if version > 0 {
 					var comment string
 					require.NoError(t, db.QueryRowContext(t.Context(), `SELECT col_description($1::regclass, attnum) FROM pg_attribute WHERE attrelid = $1::regclass AND attname = 'rrule'`, schema+".calendar_events").Scan(&comment))

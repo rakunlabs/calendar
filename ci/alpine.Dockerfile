@@ -1,10 +1,11 @@
-ARG ALPINE=alpine:3.21.3
+ARG ALPINE=alpine:3.24.1
 
 FROM $ALPINE
 
 RUN apk --no-cache --no-progress add tzdata ca-certificates
 
-COPY calendar /
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/calendar /
 
 USER 65534
 

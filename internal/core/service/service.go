@@ -2,9 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -178,17 +178,27 @@ func (s *CalendarService) GetEventsICS(ctx context.Context, q *query.Query) ([]m
 				continue
 			}
 
-			qYearStr, ok := v.Value.(string)
-			if !ok {
+			var years []string
+			switch value := v.Value.(type) {
+			case string:
+				years = []string{value}
+			case []string:
+				years = value
+			default:
 				return nil, fmt.Errorf("invalid year format")
 			}
 
-			qYearInt, err := strconv.Atoi(qYearStr)
-			if err != nil {
-				return nil, fmt.Errorf("invalid year format: %w", err)
-			}
+			for _, year := range years {
+				qYearInt, err := strconv.Atoi(year)
+				if err != nil {
+					return nil, fmt.Errorf("invalid year format: %w", err)
+				}
+				if qYearInt < 1 || qYearInt > 9999 {
+					return nil, fmt.Errorf("year must be between 1 and 9999")
+				}
 
-			qYearCheck = append(qYearCheck, qYearInt)
+				qYearCheck = append(qYearCheck, qYearInt)
+			}
 		}
 	}
 
@@ -203,11 +213,17 @@ func (s *CalendarService) GetEventsICS(ctx context.Context, q *query.Query) ([]m
 			return nil
 		}
 
-		s.tzTime(&h)
+		if err := s.tzTime(&h); err != nil {
+			return err
+		}
 
 		if strings.TrimSpace(h.RRule) == "" {
-			if slices.Contains(qYearCheck, h.DateFrom.Year()) {
-				events = append(events, h)
+			for _, year := range qYearCheck {
+				from := time.Date(year, 1, 1, 0, 0, 0, 0, h.DateFrom.Location())
+				if h.DateFrom.Before(from.AddDate(1, 0, 0)) && h.DateTo.After(from) {
+					events = append(events, h)
+					break
+				}
 			}
 
 			return nil
@@ -218,39 +234,42 @@ func (s *CalendarService) GetEventsICS(ctx context.Context, q *query.Query) ([]m
 			return fmt.Errorf("failed to get rrule: %w", err)
 		}
 
+		seen := map[string]bool{}
 		for _, rrule := range icsRepeat.RRule {
-			var minYear, maxYear int
 			for _, year := range qYearCheck {
-				if year < minYear || minYear == 0 {
-					minYear = year
+				from := time.Date(year, 1, 1, 0, 0, 0, 0, h.DateFrom.Location())
+				// MatchRRuleBetween is inclusive; ICS year windows are [from, to).
+				_, _, ok := ical.MatchRRuleBetween(rrule, h.DateFrom.Time, h.DateTo.Time, from.Add(time.Nanosecond), from.AddDate(1, 0, 0).Add(-time.Nanosecond))
+				if !ok {
+					continue
 				}
-				if year > maxYear {
-					maxYear = year
+				// Keep DTSTART and COUNT together: moving the anchor invents occurrences.
+				series := h
+				series.RRule = rrule.Org()
+				if len(icsRepeat.RRule) > 1 {
+					series.ID = fmt.Sprintf("%s-rrule-%x", h.ID, sha256.Sum256([]byte(series.RRule)))
 				}
+				if !seen[series.ID] {
+					seen[series.ID] = true
+					events = append(events, series)
+				}
+				break
 			}
-
-			yearTime := time.Date(minYear, 1, 1, 0, 0, 0, 0, h.DateFrom.Time.Location())
-			start, stop, ok := ical.MatchRRuleBetween(rrule, h.DateFrom.Time, h.DateTo.Time, yearTime, yearTime.AddDate(maxYear-minYear+1, 0, 0))
-			if !ok {
-				return nil
-			}
-
-			h.DateFrom.Time = start
-			h.DateTo.Time = stop
-			h.RRule = rrule.Org()
-
-			events = append(events, h)
-			break
 		}
 
 		for _, yearFn := range icsRepeat.Func {
-			for year := range qYearCheck {
+			for _, year := range qYearCheck {
 				newDate := yearFn(year)
-				h.DateFrom.Time = newDate
-				h.DateTo.Time = h.DateFrom.Time.AddDate(0, 0, 1)
+				instance := h
+				instance.DateFrom.Time = time.Date(newDate.Year(), newDate.Month(), newDate.Day(), 0, 0, 0, 0, h.DateFrom.Location())
+				instance.DateTo.Time = instance.DateFrom.AddDate(0, 0, 1)
+				instance.RRule = ""
+				instance.AllDay = true
+				instance.ID = h.ID + "-func-" + instance.DateFrom.Format("20060102")
 
-				if h.DateFrom.Year() == year {
-					events = append(events, h)
+				if instance.DateFrom.Year() == year && !seen[instance.ID] {
+					seen[instance.ID] = true
+					events = append(events, instance)
 				}
 			}
 		}

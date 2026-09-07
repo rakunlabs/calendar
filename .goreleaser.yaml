@@ -1,5 +1,3 @@
-# This is an example .goreleaser.yml file with some sensible defaults.
-# Make sure to check the documentation at https://goreleaser.com
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 
 version: 2
@@ -12,7 +10,7 @@ git:
 
 release:
   header: |
-    Get the latest release with brew or binary:
+    Download the release binary:
 
     ```sh
     # curl -fSL https://github.com/rakunlabs/calendar/releases/latest/download/calendar_Linux_x86_64.tar.gz | tar -xz --overwrite -C ~/bin/ calendar
@@ -23,10 +21,11 @@ release:
 before:
   hooks:
     - make ui-build
-    # You may remove this if you don't use go modules.
     - go mod tidy
 builds:
-  - env:
+  - id: calendar
+    binary: calendar
+    env:
       - CGO_ENABLED=0
     goos:
       - linux
@@ -36,13 +35,18 @@ builds:
       - amd64
       - arm
       - arm64
+    ignore:
+      - goos: windows
+        goarch: arm
     main: ./cmd/calendar
     ldflags:
       - -s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}} -X main.date={{.Date}}
     flags:
       - -trimpath
 archives:
-  - name_template: >-
+  - formats:
+      - tar.gz
+    name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
@@ -51,11 +55,12 @@ archives:
       {{- if .Arm }}v{{ .Arm }}{{ end }}
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
 checksum:
   name_template: '{{ .ProjectName }}-{{ .Version }}-checksums.txt'
 snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+  version_template: "{{ incpatch .Version }}-next"
 changelog:
   sort: asc
   use: github
@@ -85,31 +90,30 @@ changelog:
     - title: Other work
       order: 9999
 
-brews:
-- name: calendar
-  homepage: https://github.com/rakunlabs/calendar
-  description: "swiss knife for services"
-  repository:
-    owner: brew-tools
-    name: homebrew-tap
-    token: "{{ .Env.BREW_TOKEN }}"
-  directory: Formula
-
-dockers:
-- image_templates:
-  - 'ghcr.io/rakunlabs/calendar:{{ .Tag }}'
-  - 'ghcr.io/rakunlabs/calendar:{{ .Tag }}-alpine'
-  - 'ghcr.io/rakunlabs/calendar:{{ .Tag }}-alpine3.21.3'
-  - 'ghcr.io/rakunlabs/calendar:latest'
-  dockerfile: ci/alpine.Dockerfile
-  build_flag_templates:
-  - "--pull"
-  - "--label=io.artifacthub.package.readme-url=https://raw.githubusercontent.com/rakunlabs/calendar/main/README.md"
-  - "--label=io.artifacthub.package.maintainers=[{\"name\":\"Eray Ates\",\"email\":\"eates23@gmail.com\"}]"
-  - "--label=io.artifacthub.package.license=MIT"
-  - "--label=org.opencontainers.image.description=calendar service"
-  - "--label=org.opencontainers.image.created={{.Date}}"
-  - "--label=org.opencontainers.image.name={{.ProjectName}}"
-  - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-  - "--label=org.opencontainers.image.version={{.Version}}"
-  - "--label=org.opencontainers.image.source={{.GitURL}}"
+dockers_v2:
+  - id: calendar
+    ids:
+      - calendar
+    dockerfile: ci/alpine.Dockerfile
+    images:
+      - ghcr.io/rakunlabs/calendar
+    tags:
+      - "{{ .Tag }}"
+      - "{{ .Tag }}-alpine"
+      - "{{ .Tag }}-alpine3.24.1"
+      - "{{ if not .Prerelease }}latest{{ end }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    flags:
+      - "--pull=true"
+    labels:
+      io.artifacthub.package.readme-url: https://raw.githubusercontent.com/rakunlabs/calendar/main/README.md
+      io.artifacthub.package.maintainers: '[{"name":"Eray Ates","email":"eates23@gmail.com"}]'
+      io.artifacthub.package.license: MIT
+      org.opencontainers.image.description: calendar service
+      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.name: "{{ .ProjectName }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.source: "{{ .GitURL }}"

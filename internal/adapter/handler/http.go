@@ -2,8 +2,10 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -341,7 +343,7 @@ func (h *HTTP) PutEvent(c *ada.Context) error {
 // /////////////////////////////////////////////////////////////
 
 // @Summary AddRelations
-// @Description AddRelations
+// @Description Accepts one relation or a nonempty batch. Entity and supplied targets must be nonempty. At least one target is required; both targets retain group OR event matching. Duplicate assignments are ignored.
 // @Accept json
 // @Param body body []models.Relation true "Relation"
 // @Success 200 {object} ResponseMessage
@@ -354,11 +356,19 @@ func (h *HTTP) AddRelations(c *ada.Context) error {
 	if err := c.Bind(&v, bind.WithJSONSingleAsSlice(true)); err != nil {
 		return responseError(http.StatusBadRequest, err)
 	}
+	if len(v) == 0 {
+		return ada.NewHTTPError(http.StatusBadRequest, "empty relations batch")
+	}
 
 	updatedBy := c.Request.Header.Get("X-User")
 	for i := range v {
-		if v[i].Entity == "" {
+		if strings.TrimSpace(v[i].Entity) == "" {
 			return ada.NewHTTPError(http.StatusBadRequest, "missing entity")
+		}
+		if (v[i].EventGroup.Valid && strings.TrimSpace(v[i].EventGroup.V) == "") ||
+			(v[i].EventID.Valid && strings.TrimSpace(v[i].EventID.V) == "") ||
+			(!v[i].EventGroup.Valid && !v[i].EventID.Valid) {
+			return ada.NewHTTPError(http.StatusBadRequest, "provide at least one target; supplied targets must be nonempty")
 		}
 
 		v[i].UpdatedBy = updatedBy
@@ -377,6 +387,8 @@ func (h *HTTP) AddRelations(c *ada.Context) error {
 
 // @Summary DeleteRelations
 // @Description DeleteRelations for multiple relations
+// @Description With _exact=true, entity and targets are literal equality values; omitted targets must be NULL. At least one target is required. Without _exact, legacy bulk query semantics apply.
+// @Param _exact query bool false "Delete only the exact assignment, preserving combined rules"
 // @Param entity query string true "entity"
 // @Param event_id query string false "event_id"
 // @Param event_group query string false "event_group"
@@ -386,10 +398,32 @@ func (h *HTTP) AddRelations(c *ada.Context) error {
 // @Router /relations [delete]
 // @Tags Relations
 func (h *HTTP) DeleteRelations(c *ada.Context) error {
-	q, err := parseQuery(
-		c.Request.URL.RawQuery,
-		h.Validator.DeleteRelations,
-	)
+	values, err := url.ParseQuery(c.Request.URL.RawQuery)
+	if err != nil {
+		return ada.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	var q *query.Query
+	if exact, present := values["_exact"]; present {
+		if len(exact) != 1 || exact[0] != "true" {
+			return ada.NewHTTPError(http.StatusBadRequest, "_exact must be true")
+		}
+		values.Del("_exact")
+		q, err = literalQuery(values, "entity", "event_group", "event_id")
+		if err == nil {
+			if !q.Has("entity") || !q.HasAny("event_group", "event_id") {
+				return ada.NewHTTPError(http.StatusBadRequest, "exact deletion requires entity and at least one target")
+			}
+			for _, field := range []string{"event_group", "event_id"} {
+				if !q.Has(field) {
+					expr := query.NewExpressionCmp(query.OperatorIs, field, nil)
+					q.Values[field] = []*query.ExpressionCmp{expr}
+					q.Where = append(q.Where, expr)
+				}
+			}
+		}
+	} else {
+		q, err = parseQuery(c.Request.URL.RawQuery, h.Validator.DeleteRelations)
+	}
 	if err != nil {
 		return ada.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -488,17 +522,25 @@ func (h *HTTP) Holidays(c *ada.Context) error {
 }
 
 // @Summary AddICS
-// @Description AddICS
+// @Description Upload an ICS file. The entire multipart request is limited to 10 MiB.
 // @Accept multipart/form-data
 // @Param file formData file true "ICS file"
 // @Param event_group query string false "event_group for ics"
 // @Param tz query string false "timezone like Europe/Amsterdam default UTC"
 // @Success 200 {object} ResponseMessage
 // @Failure 400 {object} ResponseMessage
+// @Failure 413 {object} ResponseMessage
 // @Failure 500 {object} ResponseMessage
 // @Router /ics [post]
 // @Tags iCal
 func (h *HTTP) AddICS(c *ada.Context) error {
+	// Bound the whole multipart request, including headers and non-file fields.
+	c.Request.Body = http.MaxBytesReader(c.Response, c.Request.Body, 10<<20)
+	defer func() {
+		if c.Request.MultipartForm != nil {
+			_ = c.Request.MultipartForm.RemoveAll()
+		}
+	}()
 	var eventGroupNull types.Null[string]
 	if eventGroup := c.Request.URL.Query().Get("event_group"); eventGroup != "" {
 		eventGroupNull = types.NewNull(eventGroup)
@@ -506,6 +548,10 @@ func (h *HTTP) AddICS(c *ada.Context) error {
 
 	src, _, err := c.Request.FormFile("file")
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return ada.NewHTTPError(http.StatusRequestEntityTooLarge, "ICS upload exceeds 10 MiB")
+		}
 		return ada.NewHTTPError(http.StatusBadRequest, "failed to get file: "+err.Error())
 	}
 
@@ -544,14 +590,49 @@ func (h *HTTP) AddICS(c *ada.Context) error {
 // @Router /ics [get]
 // @Tags iCal
 func (h *HTTP) GetICS(c *ada.Context) error {
+	// Extract explicit scope equality before the generic parser interprets
+	// parentheses as query syntax. Leave legacy expressions encoded as received.
+	literal := url.Values{}
+	remaining := []string{}
+	depth := 0
+	for _, part := range strings.Split(c.Request.URL.RawQuery, "&") {
+		key, value, _ := strings.Cut(part, "=")
+		key, err := url.QueryUnescape(key)
+		if err != nil {
+			return ada.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		if depth == 0 && (key == "entity[eq]" || key == "event_group[eq]") {
+			value, err = url.QueryUnescape(value)
+			if err != nil {
+				return ada.NewHTTPError(http.StatusBadRequest, err.Error())
+			}
+			literal.Add(key, value)
+			continue
+		}
+		remaining = append(remaining, part)
+		// Match the generic parser's grouping rules for legacy expressions.
+		grouping := strings.ReplaceAll(strings.ReplaceAll(part, "%28", "("), "%29", ")")
+		depth += strings.Count(grouping, "(") - strings.Count(grouping, ")")
+	}
+	scopes, err := literalQuery(literal, "entity", "event_group")
+	if err != nil {
+		return ada.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 	q, err := parseQuery(
-		c.Request.URL.RawQuery,
+		strings.Join(remaining, "&"),
 		h.Validator.GetICS,
 		query.WithSkipExpressionCmp("year"),
 	)
 	if err != nil {
 		return ada.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	if q.Values == nil {
+		q.Values = make(map[string][]*query.ExpressionCmp)
+	}
+	for field, expressions := range scopes.Values {
+		q.Values[field] = append(q.Values[field], expressions...)
+	}
+	q.Where = append(q.Where, scopes.Where...)
 
 	events, err := h.Service.GetEventsICS(c.Request.Context(), q)
 	if err != nil {

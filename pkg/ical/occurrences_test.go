@@ -1,6 +1,7 @@
 package ical
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -20,6 +21,10 @@ func TestOccurrences(t *testing.T) {
 		{"weekly default weekday", "2026-01-05T10:00:00Z", "2026-01-05T11:00:00Z", "RRULE:FREQ=WEEKLY;COUNT=3", "2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z", []string{"2026-01-05", "2026-01-12", "2026-01-19"}},
 		{"monthly 31 skips short months", "2026-01-31T10:00:00Z", "2026-01-31T11:00:00Z", "RRULE:FREQ=MONTHLY;COUNT=3", "2026-01-01T00:00:00Z", "2026-06-01T00:00:00Z", []string{"2026-01-31", "2026-03-31", "2026-05-31"}},
 		{"special", "2020-01-01T00:00:00Z", "2020-01-02T00:00:00Z", "FUNC:GoodFriday", "2026-01-01T00:00:00Z", "2027-01-01T00:00:00Z", []string{"2026-04-03"}},
+		{"recurring overlap", "2026-01-01T00:00:00Z", "2026-01-04T00:00:00Z", "RRULE:FREQ=WEEKLY", "2026-01-03T00:00:00Z", "2026-01-05T00:00:00Z", []string{"2026-01-01"}},
+		{"until inclusive", "2026-01-01T10:00:00Z", "2026-01-01T11:00:00Z", "RRULE:FREQ=DAILY;UNTIL=20260102T100000Z", "2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z", []string{"2026-01-01", "2026-01-02"}},
+		{"recurring exclusive upper bound", "2026-01-01T10:00:00Z", "2026-01-01T11:00:00Z", "RRULE:FREQ=DAILY", "2026-01-01T11:00:00Z", "2026-01-02T10:00:00Z", nil},
+		{"mixed rules sorted and deduplicated", "2020-01-01T00:00:00Z", "2020-01-02T00:00:00Z", "FUNC:EasterSunday FUNC:GoodFriday RRULE:FREQ=YEARLY;BYMONTH=4;BYMONTHDAY=3", "2026-01-01T00:00:00Z", "2027-01-01T00:00:00Z", []string{"2026-04-03", "2026-04-05"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			parse := func(s string) time.Time { v, err := time.Parse(time.RFC3339, s); require.NoError(t, err); return v }
@@ -34,6 +39,21 @@ func TestOccurrences(t *testing.T) {
 			require.Equal(t, tc.want, days)
 		})
 	}
+}
+
+func TestOccurrencesInvalidRulesAndCancellation(t *testing.T) {
+	start := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
+	event := models.Event{DateFrom: types.Time{Time: start}, DateTo: types.Time{Time: start.Add(time.Hour)}}
+	for _, rule := range []string{"RRULE:FREQ=DAILY;BYHOUR=no", "RRULE:FREQ=DAILY;BYMONTH=13", "RRULE:FREQ=HOURLY", "RRULE:FREQ=DAILY;INTERVAL=0"} {
+		event.RRule = rule
+		_, err := Occurrences(t.Context(), event, start, start.AddDate(1, 0, 0))
+		require.Error(t, err)
+	}
+	event.RRule = "RRULE:FREQ=DAILY"
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := Occurrences(ctx, event, start, start.AddDate(1, 0, 0))
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestOccurrencesDST(t *testing.T) {

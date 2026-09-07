@@ -13,4 +13,4 @@
 /_ui/node_modules/
 /_ui/dist/
 /_ui/.vite/
-/.impeccable/review/
+**/.impeccable/review/

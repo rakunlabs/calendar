@@ -393,7 +393,7 @@ const docTemplate = `{
                 }
             },
             "post": {
-                "description": "AddICS",
+                "description": "Upload an ICS file. The entire multipart request is limited to 10 MiB.",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -435,6 +435,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
                         }
                     },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_adapter_handler.ResponseMessage"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -464,6 +470,18 @@ const docTemplate = `{
                         "name": "to",
                         "in": "query",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Literal entity equality (also accepts entity[eq]); AND with event_group",
+                        "name": "entity",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Literal event group equality; pagination is not supported",
+                        "name": "event_group",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -550,7 +568,7 @@ const docTemplate = `{
                 }
             },
             "post": {
-                "description": "AddRelations",
+                "description": "Accepts one relation or a nonempty batch. Entity and supplied targets must be nonempty. At least one target is required; both targets retain group OR event matching. Duplicate assignments are ignored.",
                 "consumes": [
                     "application/json"
                 ],
@@ -594,12 +612,18 @@ const docTemplate = `{
                 }
             },
             "delete": {
-                "description": "DeleteRelations for multiple relations",
+                "description": "DeleteRelations for multiple relations\nWith _exact=true, entity and targets are literal equality values; omitted targets must be NULL. At least one target is required. Without _exact, legacy bulk query semantics apply.",
                 "tags": [
                     "Relations"
                 ],
                 "summary": "DeleteRelations",
                 "parameters": [
+                    {
+                        "type": "boolean",
+                        "description": "Delete only the exact assignment, preserving combined rules",
+                        "name": "_exact",
+                        "in": "query"
+                    },
                     {
                         "type": "string",
                         "description": "entity",

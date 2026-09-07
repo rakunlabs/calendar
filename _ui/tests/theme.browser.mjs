@@ -12,7 +12,7 @@ try {
   const errors = [];
   let fixtures = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.route('**/v1/**', (route) => route.fulfill({ json: { payload: fixtures } }));
+   await page.route('**/v1/**', (route) => route.fulfill({ json: { payload: new URL(route.request().url()).pathname.endsWith('/relations') ? [] : fixtures } }));
   const base = `http://127.0.0.1:${server.httpServer.address().port}/calendar/`;
   let release;
   const blocked = new Promise((resolve) => {

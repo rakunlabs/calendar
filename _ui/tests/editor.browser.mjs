@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { chromium } from '@playwright/test';
 import { createServer } from 'vite';
+import { readFile } from 'node:fs/promises';
 
 // Mount only the editor; API writes are intercepted and never reach the service.
 const server = await createServer({
@@ -129,16 +130,97 @@ try {
   await page.getByLabel('All-day event').uncheck();
   assert.equal(await value('End date'), '2026-09-10');
 
+  const existing = {
+    id: 'existing', name: 'Existing', event_group: 'Team', tz: 'UTC', all_day: true,
+    date_from: '2026-01-01T00:00:00Z', date_to: '2026-01-02T00:00:00Z',
+  };
+  await open({ groups: ['Team', 'Holidays', 'Ungrouped'], event: existing });
+  const groupSelect = page.getByLabel('Calendar group', { exact: true });
+  assert.deepEqual(await groupSelect.locator('option').allTextContents(), ['No group', 'Holidays', 'Team', 'Ungrouped']);
+  await groupSelect.selectOption('Ungrouped');
+  assert.equal((await save(true)).event_group, 'Ungrouped');
+  await groupSelect.selectOption('');
+  assert.equal((await save(true)).event_group, null);
+  await page.getByLabel('Enter a group name').check();
+  await fill('Group name', 'New calendar');
+  assert.equal((await save(true)).event_group, 'New calendar');
+  await page.getByLabel('Enter a group name').uncheck();
+  await groupSelect.selectOption('Holidays');
+  assert.equal((await save(true)).event_group, 'Holidays');
+
+  const supported = [...(await readFile('../pkg/ical/special/func.go', 'utf8')).matchAll(/"([A-Z]+)":/g)].map(match => match[1]);
+  const repeat = page.getByLabel('Repeat', { exact: true });
+  assert.deepEqual(await repeat.locator('optgroup option').evaluateAll(options => options.map(option => option.value)), supported.map(name => `FUNC:${name}`));
+  for (const name of supported) {
+    await repeat.selectOption(`FUNC:${name}`);
+    assert.equal((await save(true)).rrule, `FUNC:${name}`);
+  }
+  for (const rrule of ['FUNC:EASTERSUNDAY', 'FUNC:GoodFriday', 'RRULE:FREQ=WEEKLY;COUNT=8\nFUNC:EasterMonday FUNC:WHITMONDAY']) {
+    await open({ event: { ...existing, rrule } });
+    assert.equal((await save(true)).rrule, rrule, 'Unchanged recurrence must remain byte-for-byte intact');
+    await repeat.selectOption('FUNC:ASCENSIONDAY');
+    assert.equal((await save(true)).rrule, 'FUNC:ASCENSIONDAY');
+    if (rrule !== 'FUNC:EASTERSUNDAY') {
+      await repeat.selectOption('custom');
+      assert.equal((await save(true)).rrule, rrule, 'Returning to the existing rule restores mixed rules');
+    }
+  }
+  const timed = {
+    ...existing, all_day: false, date_from: '2026-01-01T09:30:00Z', date_to: '2026-01-03T15:00:00Z',
+    rrule: 'RRULE:FREQ=WEEKLY;COUNT=8\nFUNC:EasterMonday FUNC:WHITMONDAY',
+  };
+  await open({ event: timed });
+  let result = await save(true);
+  assert.equal(result.all_day, false);
+  assert.equal(result.date_to, '2026-01-03T15:00:00.000Z');
+  await repeat.selectOption('FUNC:GOODFRIDAY');
+  assert.equal(await page.getByLabel('All-day event').isChecked(), true);
+  assert.equal(await page.getByLabel('All-day event').isDisabled(), true);
+  assert.equal(await page.getByLabel('Start time', { exact: true }).count(), 0);
+  assert.equal(await page.getByLabel('End time', { exact: true }).count(), 0);
+  assert.equal(await page.getByLabel('Start date', { exact: true }).isDisabled(), true);
+  assert.equal(await page.getByLabel('End date', { exact: true }).isDisabled(), true);
+  assert.match(await page.locator('#event-special-help').textContent(), /one full calendar day/);
+  result = await save(true);
+  assert.equal(result.rrule, 'FUNC:GOODFRIDAY');
+  assert.equal(result.all_day, true);
+  assert.equal(result.date_from, '2026-01-01T00:00:00.000Z');
+  assert.equal(result.date_to, '2026-01-02T00:00:00.000Z');
+  await repeat.selectOption('custom');
+  result = await save(true);
+  assert.equal(result.rrule, timed.rrule);
+  assert.equal(result.all_day, false);
+  assert.equal(result.date_from, '2026-01-01T09:30:00.000Z');
+  assert.equal(result.date_to, '2026-01-03T15:00:00.000Z');
+  await open({ hour: 9.5 });
+  await repeat.selectOption('FUNC:EASTERSUNDAY');
+  result = await save();
+  assert.equal(result.all_day, true);
+  assert.equal(result.date_from, '2026-09-07T04:00:00.000Z');
+  assert.equal(result.date_to, '2026-09-08T04:00:00.000Z');
+  await open({ groupsLoading: true });
+  assert.equal(await page.getByRole('status').textContent(), 'Loading groups...');
+  await open({ groupsError: 'Service unavailable.' });
+  assert.match(await page.getByRole('alert').textContent(), /Could not load groups/);
+  assert.equal(await page.getByRole('button', { name: 'Retry groups' }).isEnabled(), true);
+  await open({ groups: ['Team', 'Holidays'], event: { ...existing, rrule: 'FUNC:EASTERSUNDAY' } });
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 844 });
     assert(
       await page.getByRole('dialog').evaluate((el) => el.scrollWidth <= el.clientWidth),
       `Editor overflow at ${width}px`,
     );
+    await groupSelect.selectOption('Holidays');
+    await repeat.selectOption('FUNC:WHITMONDAY');
+    assert.equal((await save(true)).rrule, 'FUNC:WHITMONDAY');
+    if (process.env.SCREENSHOT_DIR) {
+      await page.getByRole('dialog').evaluate(el => { el.scrollTop = 0; });
+      await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/editor-special-${width}.png`, fullPage: true });
+    }
   }
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: editor defaults, inclusive all-day endDay/exclusive save across DST, slot range, duration, all-day conversion/toggle, original zone, desktop/mobile overflow.',
+    'PASS: editor dates/DST, groups/new names/no group, all supported FUNC presets, lossless custom/mixed recurrence, loading/errors, desktop/mobile selection and overflow.',
   );
 } finally {
   await browser?.close();

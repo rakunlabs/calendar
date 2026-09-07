@@ -27,7 +27,6 @@ require (
 	github.com/rakunlabs/tell v0.1.5
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/swag v1.16.6
-	github.com/teambition/rrule-go v1.8.2
 	github.com/worldline-go/test v0.5.1
 	github.com/worldline-go/types v0.6.1
 )

@@ -175,11 +175,10 @@
                 if (event.button !== 0 || event.pointerType === 'touch') return;
                 selection = { day: index, anchor: slot, end: slot };
               }}
-              onpointerup={(event) => {
-                if (event.pointerType === 'touch') create(index, slot);
-              }}
               onclick={(event) => {
-                if (event.detail === 0) create(index, slot);
+                // Wait for the touch click so it cannot activate a control in the new dialog.
+                if (event.detail === 0 || (event instanceof PointerEvent && event.pointerType === 'touch'))
+                  create(index, slot);
               }}><span>{String(Math.floor(slot / 2)).padStart(2, '0')}:{slot % 2 ? '30' : '00'}</span></button
             >{/each}
           {#each timed[index] as item}

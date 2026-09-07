@@ -57,7 +57,8 @@ try {
   await page.waitForTimeout(150);
   if (await page.locator('dialog').count() === 0) throw new Error(`Editor did not mount: ${errors.join('; ')}`);
   await page.getByLabel('Event name', { exact: true }).fill(token);
-  await page.getByLabel('Calendar group').fill('Test');
+  await page.getByLabel('Enter a group name').check();
+  await page.getByLabel('Group name', { exact: true }).fill('Test');
   await page.locator('dialog').getByRole('button', { name: 'Create event', exact: true }).click();
   await page.locator('dialog').waitFor({ state: 'detached' });
   await page.getByLabel('Search events', { exact: true }).fill(token);

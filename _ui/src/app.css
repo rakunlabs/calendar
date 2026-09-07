@@ -195,7 +195,7 @@ textarea {
 }
 .app-shell {
   display: grid;
-  grid-template-columns: 224px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   min-height: 100vh;
 }
 .sidebar {
@@ -206,10 +206,14 @@ textarea {
   overflow-y: auto;
   background: var(--sidebar);
   border-right: 1px solid var(--line);
-  padding: 31px 22px 22px;
+  padding: 8px 8px;
+  scrollbar-width: none;
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+.sidebar::-webkit-scrollbar {
+  display: none;
 }
 .brand {
   color: #ef233c;
@@ -270,7 +274,7 @@ textarea {
 }
 .new-event-sidebar {
   width: 100%;
-  margin: 27px 0 29px;
+  margin: 8px 0;
 }
 .icon-button {
   width: 32px;
@@ -763,14 +767,20 @@ main {
 }
 .agenda-events {
   display: grid;
-  gap: 20px;
+  gap: 0;
 }
 .agenda-event {
+  display: grid;
+  grid-template-columns: 42px 6px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  min-width: 0;
   text-align: left;
   border: 0;
   border-bottom: 1px solid var(--line-subtle);
   background: none;
-  padding: 0 0 20px;
+  padding: 8px 0;
   width: 100%;
 }
 .agenda-event:hover h3 {
@@ -780,54 +790,29 @@ main {
 }
 .agenda-event-meta {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  color: var(--muted);
-}
-.group-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--event);
-  font-size: 9px;
-  font-weight: 650;
-  max-width: 90%;
-  overflow-wrap: anywhere;
-}
-.agenda-event h3 {
-  font-size: 13px;
-  font-weight: 750;
-  margin: 10px 0 8px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-.agenda-time {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 10px;
-}
-.agenda-event p {
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.7;
-  margin-top: 11px;
-  overflow-wrap: anywhere;
-  white-space: pre-line;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.edit-event {
-  display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-top: 12px;
-  font-size: 9px;
-  color: var(--accent-ink);
+  color: var(--muted);
+}
+.agenda-group {
+  display: flex;
+  align-items: center;
+  color: var(--event);
+}
+.agenda-event h3 {
+  font-size: 12px;
   font-weight: 650;
+  margin: 0;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agenda-time {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .disabled-label {
   font-size: 8px;
@@ -956,7 +941,7 @@ main {
   max-height: none;
 }
 .weekly-layout .agenda-events {
-  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  grid-template-columns: 1fr;
 }
 .weekly-layout .agenda-add {
   align-self: flex-start;
@@ -1179,6 +1164,97 @@ main {
   background: var(--surface);
   box-shadow: 0 24px 90px var(--shadow-dialog);
 }
+.entity-filter {
+  margin-top: 24px;
+}
+.entity-filter > label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.entity-filter select {
+  width: 100%;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--control-line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+}
+.tools-trigger {
+  width: 100%;
+  margin-top: 12px;
+}
+.tools-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 16px 26px 0;
+}
+.tools-navigation [aria-pressed='true'] {
+  background: var(--selected-bg);
+  border-color: var(--selected-line);
+}
+.tools-body fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.tools-body h3 {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.tools-body .field-hint {
+  font-size: 12px;
+}
+.tools-action {
+  margin-top: 16px;
+  margin-right: 6px;
+}
+.tools-section {
+  border-top: 1px solid var(--line);
+  margin-top: 28px;
+  padding-top: 22px;
+}
+.assignment-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+}
+.assignment-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.assignment-list li > div {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.assignment-list strong,
+.assignment-list span {
+  display: block;
+  font-size: 12px;
+}
+.tools-dialog button {
+  min-height: 36px;
+}
+@media (max-width: 700px) {
+  .entity-filter select {
+    font-size: 16px;
+  }
+  .tools-dialog button {
+    min-height: 44px;
+  }
+  .tools-navigation {
+    padding-inline: 18px;
+  }
+}
 .event-dialog::backdrop {
   background: var(--backdrop);
 }
@@ -1391,24 +1467,9 @@ main {
     margin-bottom: 0;
   }
 }
-@media (min-width: 1650px) {
-  .month-cell {
-    min-height: 134px;
-  }
-  .calendar-layout:not(.weekly-layout) {
-    grid-template-columns: minmax(0, 1fr) 285px;
-  }
-  .event-chip {
-    font-size: 11px;
-    padding: 6px;
-  }
-}
 @media (max-width: 1200px) {
   .app-shell {
-    grid-template-columns: 195px minmax(0, 1fr);
-  }
-  .sidebar {
-    padding-inline: 16px;
+    grid-template-columns: 211px minmax(0, 1fr);
   }
   .calendar-layout:not(.weekly-layout) {
     grid-template-columns: minmax(0, 1fr) 215px;
@@ -1438,7 +1499,7 @@ main {
     overflow-y: visible;
   }
   .app-shell {
-    grid-template-columns: 190px minmax(0, 1fr);
+    grid-template-columns: 206px minmax(0, 1fr);
   }
   .calendar-layout:not(.weekly-layout) {
     grid-template-columns: minmax(0, 1fr);
@@ -1448,8 +1509,7 @@ main {
     border-top: 1px solid var(--line);
   }
   .agenda-events {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 20px;
+    grid-template-columns: 1fr;
   }
   .empty-agenda {
     max-width: 330px;
@@ -1615,19 +1675,12 @@ main {
     margin: 22px 0 17px;
   }
   .agenda-event h3 {
-    font-size: 14px;
-  }
-  .agenda-time,
-  .agenda-event p {
-    font-size: 11px;
+    font-size: 13px;
   }
   .agenda-add {
     font-size: 11px;
     padding: 13px;
     width: 100%;
-  }
-  .agenda-event .edit-event {
-    font-size: 10px;
   }
   .year-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
