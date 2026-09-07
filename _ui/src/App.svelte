@@ -30,6 +30,8 @@
     type View,
   } from './lib/calendar';
   import EventEditor from './EventEditor.svelte';
+  import TimeGrid from './TimeGrid.svelte';
+  import ThemePicker from './ThemePicker.svelte';
 
   const today = new Date();
   let selected = $state(new Date());
@@ -46,8 +48,15 @@
   let catalogError = $state('');
   let rangeError = $state('');
   let revision = $state(0);
-  let editor = $state<{ event: CalendarEvent | null; day: Date; hour?: number } | null>(null);
+  let editor = $state<{ event: CalendarEvent | null; day: Date; hour?: number; endDay?: Date } | null>(null);
   let toast = $state('');
+  let monthGrid = $state<HTMLDivElement>();
+  let monthSelection = $state<{
+    pointerId: number;
+    anchor: number;
+    end: number;
+    fromDateButton: boolean;
+  } | null>(null);
   let toastTimer: ReturnType<typeof setTimeout>;
   onDestroy(() => clearTimeout(toastTimer));
 
@@ -86,7 +95,9 @@
     return map;
   });
   const heading = $derived(
-    format(focus, view === 'year' ? 'yyyy' : view === 'day' ? 'MMMM d, yyyy' : 'MMMM yyyy'),
+    view === 'week'
+      ? `${format(range[0], 'MMM d')} - ${format(addDays(range[1], -1), 'MMM d, yyyy')}`
+      : format(focus, view === 'year' ? 'yyyy' : view === 'day' ? 'MMMM d, yyyy' : 'MMMM yyyy'),
   );
 
   $effect(() => {
@@ -130,12 +141,47 @@
         ? addYears(focus, direction)
         : view === 'month'
           ? addMonths(startOfMonth(focus), direction)
-          : addDays(focus, direction);
+          : addDays(focus, direction * (view === 'week' ? 7 : 1));
     selected = focus;
+  }
+  $effect(() => {
+    focus;
+    view;
+    monthSelection = null;
+  });
+
+  function startMonthSelection(event: PointerEvent) {
+    if (event.button !== 0 || !event.isPrimary || event.pointerType === 'touch') return;
+    const target = event.target as HTMLElement;
+    const button = target.closest('button');
+    if (button && !button.classList.contains('day-select')) return;
+    const cell = target.closest<HTMLElement>('[data-month-index]');
+    if (!cell) return;
+    const index = Number(cell.dataset.monthIndex);
+    monthSelection = { pointerId: event.pointerId, anchor: index, end: index, fromDateButton: !!button };
+  }
+
+  function moveMonthSelection(event: PointerEvent) {
+    if (!monthSelection || event.pointerId !== monthSelection.pointerId) return;
+    const cell = document
+      .elementFromPoint(event.clientX, event.clientY)
+      ?.closest<HTMLElement>('[data-month-index]');
+    if (cell && monthGrid?.contains(cell)) monthSelection.end = Number(cell.dataset.monthIndex);
+  }
+
+  function finishMonthSelection(event: PointerEvent) {
+    if (!monthSelection || event.pointerId !== monthSelection.pointerId) return;
+    const { anchor, end, fromDateButton } = monthSelection;
+    monthSelection = null;
+    // A date-number click still selects the agenda; dragging it creates a range.
+    if (fromDateButton && anchor === end) return;
+    const day = days[Math.min(anchor, end)];
+    selected = day;
+    editor = { event: null, day, endDay: days[Math.max(anchor, end)] };
   }
   function selectDay(day: Date) {
     selected = day;
-    if (!isSameMonth(day, focus) || view === 'day') focus = day;
+    if (!isSameMonth(day, focus) || view === 'day' || view === 'week') focus = day;
   }
   function chooseView(next: View) {
     view = next;
@@ -173,8 +219,13 @@
 <svelte:head><title>{heading} · Calendar</title></svelte:head>
 <svelte:window
   onkeydown={(e) => {
+    if (e.key === 'Escape') monthSelection = null;
     if (e.key === 'Escape' && filtersOpen && !editor) closeFilters();
   }}
+  onpointermove={moveMonthSelection}
+  onpointerup={finishMonthSelection}
+  onpointercancel={() => (monthSelection = null)}
+  onblur={() => (monthSelection = null)}
   onresize={() => {
     if (window.innerWidth > 700) filtersOpen = false;
   }}
@@ -189,10 +240,9 @@
     >
     <a class="brand" href={import.meta.env.BASE_URL}
       ><span class="brand-mark"><CalendarDays size={22} strokeWidth={1.8} /></span><span
-        >calendar<span class="brand-period">.</span></span
+        >calendar</span
       ></a
     >
-    <div class="workspace-label"><span class="status-dot"></span> Your calendar workspace</div>
     <button class="primary-button new-event-sidebar" onclick={() => (editor = { event: null, day: selected })}
       ><Plus size={18} />New event</button
     >
@@ -270,23 +320,11 @@
         >
       </div>
       <div class="topbar-right">
-        <span class="today-label">{format(today, 'EEE, d MMM')}</span><span
-          class="workspace-avatar"
-          aria-label="Calendar workspace">C</span
-        >
+        <span class="today-label">{format(today, 'EEE, d MMM')}</span>
+        <ThemePicker />
       </div>
     </header>
     <div class="page-content">
-      <div class="page-heading">
-        <div>
-          <h1>Your time, in view.</h1>
-          <p>A little perspective on everything coming up.</p>
-        </div>
-        <button
-          class="primary-button desktop-create"
-          onclick={() => (editor = { event: null, day: selected })}><Plus size={17} />Create event</button
-        >
-      </div>
       <div class="calendar-toolbar">
         <div class="period-controls">
           <button class="secondary-button today-button" onclick={goToday}>Today</button>
@@ -297,7 +335,7 @@
               ><ChevronRight size={19} /></button
             >
           </div>
-          <h2 aria-live="polite">{heading}</h2>
+          <h1 aria-live="polite">{heading}</h1>
         </div>
         <div class="toolbar-end">
           <button
@@ -312,7 +350,7 @@
             onclick={() => revision++}><RefreshCw size={17} class={loading ? 'spin' : ''} /></button
           >
           <div class="view-switch" aria-label="Calendar view">
-            {#each ['month', 'day', 'year'] as mode}<button
+            {#each ['month', 'week', 'day', 'year'] as mode}<button
                 class:active={view === mode}
                 aria-pressed={view === mode}
                 onclick={() => chooseView(mode as View)}>{mode[0].toUpperCase() + mode.slice(1)}</button
@@ -345,26 +383,48 @@
           </div>
           <button class="secondary-button" onclick={() => revision++}>Try again</button>
         </div>{/if}
-      <div class="calendar-layout" aria-busy={loading}>
+      <div class="calendar-layout" class:weekly-layout={view === 'week'} aria-busy={loading}>
         <section class="calendar-surface" aria-label={`${view} calendar`}>
           {#if view === 'month'}
             <div class="weekdays">
               {#each weekdays as name}<span>{name}</span>{/each}
             </div>
-            <div class="month-grid">
-              {#each days as day}
+            <div
+              class="month-grid"
+              role="group"
+              aria-label="Month date selection"
+              class:selecting-range={!!monthSelection}
+              bind:this={monthGrid}
+              onpointerdown={startMonthSelection}
+            >
+              {#each days as day, index}
                 {@const dayEvents = daysWithEvents.get(dayKey(day)) || []}
                 <div
                   class="month-cell"
+                  data-month-index={index}
+                  data-date={dayKey(day)}
+                  class:range-selected={!!monthSelection &&
+                    index >= Math.min(monthSelection.anchor, monthSelection.end) &&
+                    index <= Math.max(monthSelection.anchor, monthSelection.end)}
                   class:other-month={!isSameMonth(day, focus)}
                   class:selected-day={isSameDay(day, selected)}
                   class:weekend={day.getDay() === 0 || day.getDay() === 6}
                 >
                   <button
+                    class="month-add icon-button small"
+                    aria-label={`Create event on ${format(day, 'MMMM d, yyyy')}`}
+                    onclick={() => {
+                      selectDay(day);
+                      editor = { event: null, day };
+                    }}><Plus size={13} /></button
+                  >
+                  <button
                     class="day-select"
                     aria-label={`Select ${format(day, 'EEEE, MMMM d, yyyy')}, ${dayEvents.length} events`}
                     aria-pressed={isSameDay(day, selected)}
-                    onclick={() => selectDay(day)}
+                    onclick={() => {
+                      if (!editor) selectDay(day);
+                    }}
                     ><span class:today-number={isSameDay(day, today)}>{day.getDate()}</span
                     >{#if isSameDay(day, today)}<span class="today-word">Today</span>{/if}</button
                   >
@@ -391,6 +451,20 @@
                 </div>
               {/each}
             </div>
+          {:else if view === 'week' || view === 'day'}
+            {#key view}<TimeGrid
+                start={range[0]}
+                dayCount={view === 'day' ? 1 : 7}
+                events={filtered}
+                {selected}
+                {catalogLoading}
+                onselect={selectDay}
+                onopen={openEvent}
+                oncreate={(day, endDay) => {
+                  selected = day;
+                  editor = { event: null, day, hour: day.getHours() + day.getMinutes() / 60, endDay };
+                }}
+              />{/key}
           {:else if view === 'year'}
             <div class="year-grid">
               {#each Array.from({ length: 12 }, (_, i) => new Date(focus.getFullYear(), i, 1)) as month}<section
@@ -423,47 +497,6 @@
                       >{/each}
                   </div>
                 </section>{/each}
-            </div>
-          {:else}
-            <div class="day-view">
-              <div class="day-view-title">
-                <span class="big-date">{format(focus, 'dd')}</span>
-                <div>
-                  <h3>{format(focus, 'EEEE')}</h3>
-                  <p>{format(focus, 'MMMM yyyy')} · {localZone}</p>
-                </div>
-              </div>
-              {#if selectedEvents.some((e) => e.all_day)}<div class="all-day-row">
-                  <span>ALL DAY</span>
-                  <div>
-                    {#each selectedEvents.filter((e) => e.all_day) as event}<button
-                        class={`event-chip event-color-${colorFor(groupName(event))}`}
-                        disabled={catalogLoading}
-                        onclick={() => openEvent(event)}><span class="event-dot"></span>{event.name}</button
-                      >{/each}
-                  </div>
-                </div>{/if}
-              {#each Array.from({ length: 24 }, (_, i) => i) as hour}<div class="hour-row">
-                  <time>{String(hour).padStart(2, '0')}:00</time>
-                  <div>
-                    {#each selectedEvents.filter((e) => !e.all_day && (isSameDay(new Date(e.date_from), focus) ? new Date(e.date_from).getHours() : 0) === hour) as event}<button
-                        class={`day-event event-color-${colorFor(groupName(event))}`}
-                        onclick={() => openEvent(event)}
-                        disabled={catalogLoading}
-                        ><strong>{event.name}</strong><span
-                          >{format(new Date(event.date_from), 'HH:mm')} – {format(
-                            new Date(event.date_to),
-                            'HH:mm',
-                          )} · {groupName(event)}</span
-                        ></button
-                      >{/each}<button
-                      class="hour-add"
-                      aria-label={`Add event at ${hour}:00`}
-                      onclick={() => (editor = { event: null, day: selected, hour })}
-                      ><Plus size={14} /></button
-                    >
-                  </div>
-                </div>{/each}
             </div>
           {/if}
           {#if loading}<div class="loading-strip" role="status">
@@ -551,6 +584,7 @@
     event={editor.event}
     day={editor.day}
     hour={editor.hour}
+    endDay={editor.endDay}
     {groups}
     onclose={() => (editor = null)}
     onsaved={saved}

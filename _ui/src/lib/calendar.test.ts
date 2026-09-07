@@ -40,6 +40,12 @@ describe('calendar dates', () => {
     expect(to.getFullYear()).toBe(2025);
     expect(to.getMonth()).toBe(0);
   });
+  it('bounds weeks Monday to Monday across year boundaries', () => {
+    const [from, to] = viewRange(new Date(2026, 0, 1), 'week');
+    expect(from).toEqual(new Date(2025, 11, 29));
+    expect(to).toEqual(new Date(2026, 0, 5));
+    expect(viewRange(new Date(2026, 0, 4), 'week')).toEqual([from, to]);
+  });
   it('keeps group colors stable', () => {
     expect(colorFor('Team')).toBe(colorFor('Team'));
     expect(colorFor('Holidays')).toBeLessThan(6);

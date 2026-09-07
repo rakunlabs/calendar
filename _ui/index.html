@@ -3,9 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#185e49" />
+    <meta name="theme-color" content="#EDF2F4" />
     <meta name="description" content="Manage events, recurring schedules, and holidays with Calendar." />
     <title>Calendar</title>
+    <script>
+      // Resolve before the app loads to avoid a light flash on dark startup.
+      let preference = 'system';
+      try {
+        const saved = localStorage.getItem('calendar.theme');
+        if (saved === 'light' || saved === 'dark') preference = saved;
+      } catch {
+        /* Storage is optional. */
+      }
+      const dark =
+        preference === 'dark' ||
+        (preference === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.themePreference = preference;
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      document.documentElement.style.backgroundColor = `var(--canvas, ${dark ? '#242424' : '#EDF2F4'})`;
+    </script>
   </head>
   <body>
     <!-- THESIS: A calendar atlas for operators, not a dashboard. OWN-WORLD: cool white, pine green, Manrope, precise date grids. STORY: scan time, inspect a day, edit the original event. FIRST VIEWPORT: navigation rail, dominant month grid, day agenda; new event beside the period title. FORM: calendar atlas, direction 3, seed 992b7f43. FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance -->

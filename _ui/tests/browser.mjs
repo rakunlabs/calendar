@@ -49,9 +49,11 @@ try {
   const errors = [];
   page.on('pageerror', e => { errors.push(e.message); console.error('Browser error:', e.message); });
   await page.goto(`${base}/calendar/`);
-  await page.getByRole('heading', { name: 'Your time, in view.' }).waitFor();
+  await page.locator('.calendar-toolbar h1').waitFor();
+  assert.equal(await page.getByText('Your time, in view.', { exact: true }).count(), 0);
+  assert.equal(await page.locator('.workspace-avatar').count(), 0);
   await page.locator('.agenda-events').waitFor();
-  await page.getByRole('button', { name: 'Create event', exact: true }).click();
+  await page.getByRole('button', { name: 'New event', exact: true }).click();
   await page.waitForTimeout(150);
   if (await page.locator('dialog').count() === 0) throw new Error(`Editor did not mount: ${errors.join('; ')}`);
   await page.getByLabel('Event name', { exact: true }).fill(token);
@@ -69,9 +71,9 @@ try {
   await page.locator('dialog').waitFor({ state: 'detached' });
   await page.getByLabel('Search events', { exact: true }).fill('');
   await page.getByRole('button', { name: 'Day', exact: true }).click();
-  await page.locator('.day-view').waitFor();
-  await page.getByRole('button', { name: 'Add event at 10:00', exact: true }).click();
-  assert.equal(await page.getByLabel('Starts', { exact: true }).inputValue().then(v => v.slice(-5)), '10:00');
+  await page.locator('.single-day').waitFor();
+  await page.locator('[data-week-slot="20"][data-day="0"]').click();
+  assert.equal(await page.getByLabel('Start time', { exact: true }).inputValue(), '10:00');
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.getByRole('button', { name: 'Year', exact: true }).click();
   assert.equal(await page.locator('.year-month').count(), 12);

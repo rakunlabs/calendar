@@ -1,14 +1,16 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import { X, Trash2, Save, Repeat2, LoaderCircle } from '@lucide/svelte';
-  import { addDays, format } from 'date-fns';
+  import { format } from 'date-fns';
   import { deleteEvent, saveEvent, type CalendarEvent } from './lib/api';
   import { dateInput, dayKey, localZone, toInstant } from './lib/calendar';
+  import { moveEditorEnd, shiftEditorDate } from './lib/editorDates';
 
   let {
     event,
     day,
     hour,
+    endDay,
     groups,
     onclose,
     onsaved,
@@ -16,16 +18,45 @@
     event: CalendarEvent | null;
     day: Date;
     hour?: number;
+    endDay?: Date;
     groups: string[];
     onclose: () => void;
     onsaved: (message: string) => void;
   } = $props();
-  const initial = untrack(() => ({ event, day, hour }));
+  const initial = untrack(() => ({ event, day, hour, endDay }));
   const original = initial.event;
   const initialZone = original?.tz || localZone;
   const initialAllDay = original?.all_day ?? initial.hour === undefined;
   const initialTime = new Date(initial.day);
-  initialTime.setHours(initial.hour ?? 9, 0, 0, 0);
+  if (initial.hour !== undefined) {
+    const minutes = Math.round(initial.hour * 60);
+    initialTime.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+  } else {
+    initialTime.setHours(9, 0, 0, 0);
+  }
+  const initialEnd =
+    initial.hour !== undefined && initial.endDay && initial.endDay > initialTime
+      ? initial.endDay
+      : new Date(initialTime.getTime() + 3600000);
+  const zones = [
+    ...new Set([
+      'UTC',
+      localZone,
+      initialZone,
+      'Europe/Istanbul',
+      'Europe/Amsterdam',
+      'Europe/London',
+      'America/New_York',
+      'America/Chicago',
+      'America/Denver',
+      'America/Los_Angeles',
+      'Asia/Dubai',
+      'Asia/Kolkata',
+      'Asia/Singapore',
+      'Asia/Tokyo',
+      'Australia/Sydney',
+    ]),
+  ];
   let dialog: HTMLDialogElement;
   let name = $state(original?.name || '');
   let description = $state(original?.description || '');
@@ -33,20 +64,22 @@
   let zone = $state(initialZone);
   let allDay = $state(initialAllDay);
   let disabled = $state(original?.disabled ?? false);
-  let start = $state(
-    original
-      ? dateInput(original.date_from, initialZone, initialAllDay)
-      : initialAllDay
-        ? dayKey(initial.day)
-        : format(initialTime, "yyyy-MM-dd'T'HH:mm"),
-  );
-  let end = $state(
-    original
-      ? dateInput(original.date_to, initialZone, initialAllDay)
-      : initialAllDay
-        ? dayKey(addDays(initial.day, 1))
-        : format(new Date(initialTime.getTime() + 3600000), "yyyy-MM-dd'T'HH:mm"),
-  );
+  const initialStartValue = original
+    ? dateInput(original.date_from, initialZone, initialAllDay)
+    : initialAllDay
+      ? dayKey(initial.day)
+      : format(initialTime, "yyyy-MM-dd'T'HH:mm");
+  const initialEndValue = original
+    ? initialAllDay
+      ? shiftEditorDate(dateInput(original.date_to, initialZone, true), -1)
+      : dateInput(original.date_to, initialZone, false)
+    : initialAllDay
+      ? dayKey(initial.endDay ?? initial.day)
+      : format(initialEnd, "yyyy-MM-dd'T'HH:mm");
+  let startDate = $state(initialStartValue.slice(0, 10));
+  let startTime = $state(initialAllDay ? '09:00' : initialStartValue.slice(11));
+  let endDate = $state(initialEndValue.slice(0, 10));
+  let endTime = $state(initialAllDay ? '10:00' : initialEndValue.slice(11));
   const rules = ['', 'RRULE:FREQ=DAILY', 'RRULE:FREQ=WEEKLY', 'RRULE:FREQ=MONTHLY', 'RRULE:FREQ=YEARLY'];
   let recurrence = $state(rules.includes(original?.rrule || '') ? original?.rrule || '' : 'custom');
   let author = $state('');
@@ -63,15 +96,42 @@
     }
   });
 
-  function toggleAllDay() {
-    if (allDay) {
-      start = start.slice(0, 10);
-      end = end.slice(0, 10);
-      if (end <= start) end = format(addDays(new Date(`${start}T12:00`), 1), 'yyyy-MM-dd');
-    } else {
-      start = `${start.slice(0, 10)}T09:00`;
-      end = `${start.slice(0, 10)}T10:00`;
+  function changeStart(value: string, time = false) {
+    const nextDate = time ? startDate : value;
+    const nextTime = time ? value : startTime;
+    try {
+      if (nextDate && (allDay || nextTime)) {
+        const moved = moveEditorEnd(
+          allDay ? startDate : `${startDate}T${startTime}`,
+          allDay ? endDate : `${endDate}T${endTime}`,
+          allDay ? nextDate : `${nextDate}T${nextTime}`,
+          zone,
+          allDay,
+        );
+        endDate = moved.slice(0, 10);
+        if (!allDay) endTime = moved.slice(11);
+      }
+      error = '';
+    } catch {
+      // Incomplete or nonexistent times remain editable; submit validates them.
     }
+    startDate = nextDate;
+    startTime = nextTime;
+  }
+
+  function toggleAllDay(checked: boolean) {
+    if (checked) {
+      if (endTime === '00:00' && endDate > startDate) endDate = shiftEditorDate(endDate, -1);
+      if (endDate < startDate) endDate = startDate;
+    } else {
+      if (endTime === '00:00' && endDate) endDate = shiftEditorDate(endDate, 1);
+      if (`${endDate}T${endTime}` <= `${startDate}T${startTime}`) {
+        startTime = '09:00';
+        endTime = '10:00';
+        endDate = startDate;
+      }
+    }
+    allDay = checked;
   }
 
   async function submit(e: SubmitEvent) {
@@ -80,8 +140,11 @@
     error = '';
     try {
       if (!name.trim()) throw new Error('Give your event a name.');
-      const date_from = toInstant(start, zone);
-      const date_to = toInstant(end, zone);
+      if (!startDate || !endDate || (!allDay && (!startTime || !endTime)))
+        throw new Error('Choose a start and end date and time.');
+      if (allDay && endDate < startDate) throw new Error('The end date must be on or after the start date.');
+      const date_from = toInstant(allDay ? startDate : `${startDate}T${startTime}`, zone);
+      const date_to = toInstant(allDay ? shiftEditorDate(endDate, 1) : `${endDate}T${endTime}`, zone);
       if (date_to <= date_from) throw new Error('The end must be after the start.');
       busy = true;
       await saveEvent(
@@ -200,42 +263,81 @@
       </div>
       {#if recurrence === 'custom'}<p class="field-hint rule-preview">{original?.rrule}</p>{/if}
       <label class="checkbox-label"
-        ><input type="checkbox" bind:checked={allDay} onchange={toggleAllDay} disabled={busy} />All-day event</label
+        ><input
+          type="checkbox"
+          checked={allDay}
+          onchange={(e) => toggleAllDay(e.currentTarget.checked)}
+          disabled={busy}
+        />All-day event</label
       >
       <div class="form-row">
         <div>
-          <label for="event-start">Starts</label><input
+          <label for="event-start">Start date</label><input
             id="event-start"
-            type={allDay ? 'date' : 'datetime-local'}
-            bind:value={start}
+            type="date"
+            value={startDate}
+            onchange={(e) => changeStart(e.currentTarget.value)}
             required
             disabled={busy}
           />
+          {#if !allDay}
+            <label for="event-start-time">Start time</label><input
+              id="event-start-time"
+              type="time"
+              value={startTime}
+              onchange={(e) => changeStart(e.currentTarget.value, true)}
+              aria-describedby="event-zone-help"
+              required
+              disabled={busy}
+            />
+          {/if}
         </div>
         <div>
-          <label for="event-end">Ends {allDay ? '(exclusive)' : ''}</label><input
+          <label for="event-end">End date</label><input
             id="event-end"
-            type={allDay ? 'date' : 'datetime-local'}
-            bind:value={end}
+            type="date"
+            bind:value={endDate}
+            min={startDate}
+            aria-describedby={allDay ? 'event-all-day-help' : undefined}
             required
             disabled={busy}
           />
+          {#if !allDay}
+            <label for="event-end-time">End time</label><input
+              id="event-end-time"
+              type="time"
+              bind:value={endTime}
+              aria-describedby="event-zone-help"
+              required
+              disabled={busy}
+            />
+          {/if}
         </div>
       </div>
-      {#if allDay}<p class="field-hint">
-          For a one-day event, choose the following day as the end date.
+      {#if allDay}<p class="field-hint" id="event-all-day-help">
+          Includes the end date. For a one-day event, use the same start and end date.
         </p>{/if}
-      <label for="event-zone">Time zone</label><input
+      <p class="field-hint">Changing the start moves the end to keep the same duration.</p>
+      <label for="event-zone">Time zone</label><select
         id="event-zone"
         bind:value={zone}
         required
-        list="time-zones"
+        aria-describedby="event-zone-help"
         disabled={busy}
-      /><datalist id="time-zones"
-        ><option>UTC</option><option>Europe/Istanbul</option><option>Europe/Amsterdam</option><option
-          >Europe/London</option
-        ><option>America/New_York</option><option>Asia/Tokyo</option></datalist
       >
+        {#each zones as timezone}
+          <option value={timezone}
+            >{timezone === 'UTC' ? 'UTC (Coordinated Universal Time)' : timezone}{timezone === localZone
+              ? ' (local)'
+              : ''}</option
+          >
+        {/each}
+      </select>
+      <p class="field-hint" id="event-zone-help">
+        {#if allDay}Dates use the selected time zone.{:else}Times use the selected time zone. Changing it
+          keeps the entered times.{/if}
+        Calendar times are displayed in {localZone} (local).
+      </p>
       <label for="event-description">Notes <span class="optional">optional</span></label><textarea
         id="event-description"
         rows="3"

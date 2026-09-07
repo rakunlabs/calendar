@@ -328,6 +328,8 @@ github.com/rakunlabs/ada/middleware/telemetry v0.5.2 h1:0JgF/EfU2OK7RAr4E8eRAmLS
 github.com/rakunlabs/ada/middleware/telemetry v0.5.2/go.mod h1:z9F2OoqFe6mUYhDdeJDUaCmH7dibnVipauMvlWphuOk=
 github.com/rakunlabs/cache v0.3.3 h1:+F9BxUvPDIkNl2w/vVJWbLZKBFwMzuPMIdP0Mik4TPo=
 github.com/rakunlabs/cache v0.3.3/go.mod h1:sYiqAPj7bU5ZqxOSNGjvMll9CsTxTl+QkzqQjtQE408=
+github.com/rakunlabs/cache v0.4.0 h1:GKMc4UrbSh1wA/u9VNAsF3YoaNlwo0MerHyxMFnf0rM=
+github.com/rakunlabs/cache v0.4.0/go.mod h1:fS/o93H/6d21HfValg5rGOIn5qhpZJLvjsF9pwV7Q4Q=
 github.com/rakunlabs/chu v0.5.0 h1:7ZgebT5VB3N6xmOGYZCb2lUczXy+jTXA5DJif3DphkI=
 github.com/rakunlabs/chu v0.5.0/go.mod h1:9cyoYo930jeubqmzBIz6U7/wlSb16v1VZxCDR3x6Qe8=
 github.com/rakunlabs/chu/loader/external/loaderconsul v0.0.0-20260831101252-0c6a77e06f7f h1:uVDxweF0rn+YNDx8wNVoC5bEFbT5V6C96J5az1sfV5E=

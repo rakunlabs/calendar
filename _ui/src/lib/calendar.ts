@@ -2,7 +2,7 @@ import { addDays, startOfDay, startOfMonth, startOfWeek, endOfMonth, format } fr
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 import type { CalendarEvent } from './api';
 
-export type View = 'month' | 'day' | 'year';
+export type View = 'month' | 'week' | 'day' | 'year';
 export const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export const dayKey = (date: Date) => format(date, 'yyyy-MM-dd');
 export const groupName = (event: CalendarEvent) => event.event_group || 'Ungrouped';
@@ -19,6 +19,10 @@ export function monthDays(date: Date, fixed = true) {
 export function viewRange(date: Date, view: View): [Date, Date] {
   if (view === 'year') return [new Date(date.getFullYear(), 0, 1), new Date(date.getFullYear() + 1, 0, 1)];
   if (view === 'day') return [startOfDay(date), addDays(startOfDay(date), 1)];
+  if (view === 'week') {
+    const from = startOfWeek(date, { weekStartsOn: 1 });
+    return [from, addDays(from, 7)];
+  }
   const days = monthDays(date);
   return [days[0], addDays(days[41], 1)];
 }
