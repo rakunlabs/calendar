@@ -55,7 +55,7 @@
   let relationsError = $state('');
   let toolsOpen = $state(false);
   const entities = $derived([...new Set(relations.map(r => r.entity))].sort());
-  let editor = $state<{ event: CalendarEvent | null; day: Date; hour?: number; endDay?: Date } | null>(null);
+  let editor = $state<{ event: CalendarEvent | null; occurrence?: CalendarEvent; day: Date; hour?: number; endDay?: Date } | null>(null);
   let toast = $state('');
   let monthGrid = $state<HTMLDivElement>();
   let monthSelection = $state<{
@@ -219,12 +219,16 @@
       : [...hiddenGroups, group];
   }
   function openEvent(event: CalendarEvent) {
+    if (catalogLoading || catalogError) {
+      notify('Refresh event details before editing.');
+      return;
+    }
     const original = templates.find((e) => e.id === event.id);
     if (!original) {
       notify('Event details are still loading. Please retry in a moment.');
       return;
     }
-    editor = { event: original, day: selected };
+    editor = { event: original, occurrence: event, day: selected };
   }
   function notify(message: string) {
     toast = message;
@@ -233,6 +237,7 @@
   }
   function saved(message: string) {
     editor = null;
+    catalogLoading = true;
     revision++;
     notify(entity ? `${message} Only events assigned to ${entity} appear in this view.` : message);
   }
@@ -341,6 +346,16 @@
       <label class="group-filter disabled-filter"
         ><input type="checkbox" bind:checked={showDisabled} /><span>Show disabled events</span></label
       >
+      {#if templates.some(event => event.recurrence?.overrides?.length)}
+        <details class="advanced">
+          <summary>Series exceptions</summary>
+          <p class="sidebar-hint">Restore cancelled occurrences, even when none appear on the calendar.</p>
+          {#each templates.filter(event => event.recurrence?.overrides?.length) as event}
+            <button class="secondary-button series-exception-button" disabled={catalogLoading || !!catalogError}
+              onclick={() => editor = { event, day: selected }}>{event.name || 'Untitled series'}</button>
+          {/each}
+        </details>
+      {/if}
     </section>
     <div class="sidebar-bottom">
       <div class="zone-label"><Clock3 size={15} /><span>{localZone.replaceAll('_', ' ')}</span></div>
@@ -618,6 +633,7 @@
   </div>{/if}
 {#if editor}<EventEditor
     event={editor.event}
+    occurrence={editor.occurrence}
     day={editor.day}
     hour={editor.hour}
     endDay={editor.endDay}

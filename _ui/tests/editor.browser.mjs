@@ -62,7 +62,10 @@ try {
     await page.evaluate((props) => window.openEditor(props), props);
     await page.getByRole('dialog').waitFor();
   };
-  const value = (label) => page.getByLabel(label, { exact: true }).inputValue();
+  const value = async (label) => {
+    const result = await page.getByLabel(label, { exact: true }).inputValue();
+    return label.endsWith('time') ? result.replace(/:00$/, match => result.length === 8 ? '' : match) : result;
+  };
   const fill = (label, value) => page.getByLabel(label, { exact: true }).fill(value);
   const save = async (existing = false) => {
     saved = undefined;
@@ -172,32 +175,32 @@ try {
   await open({ event: timed });
   let result = await save(true);
   assert.equal(result.all_day, false);
-  assert.equal(result.date_to, '2026-01-03T15:00:00.000Z');
+  assert.equal(result.date_to, timed.date_to);
   await repeat.selectOption('FUNC:GOODFRIDAY');
-  assert.equal(await page.getByLabel('All-day event').isChecked(), true);
-  assert.equal(await page.getByLabel('All-day event').isDisabled(), true);
-  assert.equal(await page.getByLabel('Start time', { exact: true }).count(), 0);
-  assert.equal(await page.getByLabel('End time', { exact: true }).count(), 0);
-  assert.equal(await page.getByLabel('Start date', { exact: true }).isDisabled(), true);
-  assert.equal(await page.getByLabel('End date', { exact: true }).isDisabled(), true);
-  assert.match(await page.locator('#event-special-help').textContent(), /one full calendar day/);
+  assert.equal(await page.getByLabel('All-day event').isChecked(), false);
+  assert.equal(await page.getByLabel('All-day event').isDisabled(), false);
+  assert.equal(await page.getByLabel('Start time', { exact: true }).count(), 1);
+  assert.equal(await page.getByLabel('End time', { exact: true }).count(), 1);
+  assert.equal(await page.getByLabel('Start date', { exact: true }).isDisabled(), false);
+  assert.equal(await page.getByLabel('End date', { exact: true }).isDisabled(), false);
+  assert.match(await page.locator('#event-special-help').textContent(), /timing and duration/);
   result = await save(true);
   assert.equal(result.rrule, 'FUNC:GOODFRIDAY');
-  assert.equal(result.all_day, true);
-  assert.equal(result.date_from, '2026-01-01T00:00:00.000Z');
-  assert.equal(result.date_to, '2026-01-02T00:00:00.000Z');
+  assert.equal(result.all_day, false);
+  assert.equal(result.date_from, timed.date_from);
+  assert.equal(result.date_to, timed.date_to);
   await repeat.selectOption('custom');
   result = await save(true);
   assert.equal(result.rrule, timed.rrule);
   assert.equal(result.all_day, false);
-  assert.equal(result.date_from, '2026-01-01T09:30:00.000Z');
-  assert.equal(result.date_to, '2026-01-03T15:00:00.000Z');
+  assert.equal(result.date_from, timed.date_from);
+  assert.equal(result.date_to, timed.date_to);
   await open({ hour: 9.5 });
   await repeat.selectOption('FUNC:EASTERSUNDAY');
   result = await save();
-  assert.equal(result.all_day, true);
-  assert.equal(result.date_from, '2026-09-07T04:00:00.000Z');
-  assert.equal(result.date_to, '2026-09-08T04:00:00.000Z');
+  assert.equal(result.all_day, false);
+  assert.equal(result.date_from, '2026-09-07T13:30:00.000Z');
+  assert.equal(result.date_to, '2026-09-07T14:30:00.000Z');
   await open({ groupsLoading: true });
   assert.equal(await page.getByRole('status').textContent(), 'Loading groups...');
   await open({ groupsError: 'Service unavailable.' });
@@ -218,9 +221,122 @@ try {
       await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/editor-special-${width}.png`, fullPage: true });
     }
   }
+  const recurrenceID = { value: '20260908T093017Z' };
+  await open({ event: timed });
+  for (const frequency of ['HOURLY', 'MINUTELY', 'SECONDLY']) {
+    await repeat.selectOption(`RRULE:FREQ=${frequency}`);
+    assert.equal((await save(true)).rrule, `RRULE:FREQ=${frequency}`);
+  }
+  await page.getByLabel('All-day event').check();
+  assert.equal(await repeat.locator('option[value="RRULE:FREQ=SECONDLY"]').isDisabled(), true);
+  const master = { ...timed, description: '', disabled: false, rrule: 'RRULE:FREQ=DAILY',
+    date_from: '2026-09-07T09:30:17Z', date_to: '2026-09-07T10:30:19Z', updated_at: '2026-09-01T00:00:00Z',
+    recurrence: { start: { value: '20260907T093017Z' }, duration: 'PT1H2S',
+      overrides: [{ recurrence_id: { value: '20260909T093017Z' }, cancelled: true }] },
+  };
+  const occurrence = { ...master, recurrence_id: recurrenceID, date_from: '2026-09-08T09:30:17Z', date_to: '2026-09-08T10:30:19Z',
+    recurrence: { start: recurrenceID, duration: 'PT1H2S' } };
+  await open({ event: master, occurrence });
+  assert.equal(await value('Edit scope'), 'occurrence');
+  assert.equal(await value('Start time'), '09:30:17');
+  assert.equal(await page.getByLabel('Start time', { exact: true }).getAttribute('step'), '1');
+  assert.equal(await page.getByLabel('Calendar group', { exact: true }).isDisabled(), true);
+  await fill('Start date', '2026-09-10');
+  await page.getByLabel('End date', { exact: true }).focus();
+  result = await save(true);
+  assert.equal(result.date_from, master.date_from);
+  assert.equal(result.updated_at, master.updated_at);
+  const override = result.recurrence.overrides.find(o => o.event);
+  assert.deepEqual(override.recurrence_id, recurrenceID);
+  assert.equal(override.event.date_from, '2026-09-10T09:30:17.000Z');
+  assert.equal(override.event.date_to, '2026-09-10T10:30:19.000Z');
+  assert.equal(override.event.recurrence, undefined);
+  assert.equal(override.event.rrule, '');
+
+  await open({ event: master, occurrence });
+  await page.getByRole('button', { name: 'Cancel occurrence', exact: true }).click();
+  let response = page.waitForResponse('**/v1/events**');
+  await page.getByRole('button', { name: 'Confirm cancellation' }).click();
+  await response;
+  assert.deepEqual(saved.recurrence.overrides.at(-1), { recurrence_id: recurrenceID, cancelled: true });
+  await page.getByLabel('Edit scope').selectOption('series');
+  assert.equal(await page.getByLabel('Start date', { exact: true }).isDisabled(), true);
+  assert.equal(await repeat.isDisabled(), true);
+  await page.getByText('Occurrence exceptions (1)', { exact: true }).click();
+  response = page.waitForResponse('**/v1/events**');
+  await page.getByRole('button', { name: 'Restore 20260909T093017Z' }).click();
+  await response;
+  assert.deepEqual(saved.recurrence.overrides, []);
+  assert.equal(saved.recurrence.duration, 'PT1H2S');
+
+  const overridden = { ...master, recurrence: { ...master.recurrence, overrides: [override] } };
+  await open({ event: overridden, occurrence: { ...override.event, recurrence_id: recurrenceID, is_override: true } });
+  response = page.waitForResponse('**/v1/events**');
+  await page.getByRole('button', { name: 'Reset this occurrence to series' }).click();
+  await response;
+  assert.deepEqual(saved.recurrence.overrides, []);
+
+  const custom = { ...master, tz: 'Custom/Imported', recurrence: { ...master.recurrence,
+    start: { value: '20260907T093060', tzid: 'Custom/Imported' }, timezones: ['original VTIMEZONE'], overrides: [] } };
+  await open({ event: custom });
+  assert.equal(await value('Time zone'), 'UTC');
+  assert.equal(await page.getByLabel('Start time', { exact: true }).isDisabled(), true);
+  assert.match(await page.getByRole('status').textContent(), /custom calendar time zone/);
+  result = await save(true);
+  assert.equal(result.tz, custom.tz);
+  assert.deepEqual(result.recurrence, custom.recurrence);
+  assert.equal(result.date_from, custom.date_from);
+  const zonedID = { value: '20260908T113017', tzid: 'Europe/Amsterdam' };
+  const periodMaster = { ...master, recurrence: { start: master.recurrence.start, duration: 'PT1H',
+    rdates: [{ start: recurrenceID }, { start: zonedID, duration: 'PT2H' }] } };
+  const periodOccurrence = { ...occurrence, date_to: '2026-09-08T11:30:17Z',
+    recurrence: { start: zonedID, duration: 'PT2H' } };
+  await open({ event: periodMaster, occurrence: periodOccurrence });
+  result = await save(true);
+  assert.deepEqual(result.recurrence.overrides[0].event.recurrence, periodOccurrence.recurrence);
+  assert.equal(result.recurrence.overrides[0].event.date_to, periodOccurrence.date_to);
+  assert.deepEqual(result.recurrence.overrides[0].recurrence_id, recurrenceID);
+  const leapTiming = { start: master.recurrence.start, end: { value: '20260907T103060Z' } };
+  const leapMaster = { ...master, date_to: '2026-09-07T10:30:59Z', recurrence: leapTiming };
+  await open({ event: leapMaster, occurrence: { ...leapMaster, recurrence_id: leapTiming.start } });
+  result = await save(true);
+  assert.deepEqual(result.recurrence.overrides[0].event.recurrence, leapTiming);
+  assert.equal(result.recurrence.overrides[0].event.date_to, leapMaster.date_to);
+
+  const definition = 'BEGIN:VTIMEZONE\r\nTZID:Europe/Amsterdam\r\nBEGIN:STANDARD\r\nTZOFFSETFROM:+0400\r\nTZOFFSETTO:+0400\r\nDTSTART:19700101T000000\r\nEND:STANDARD\r\nEND:VTIMEZONE';
+  const redefined = { ...master, tz: 'Europe/Amsterdam',
+    date_from: '2026-09-07T09:30:17+04:00', date_to: '2026-09-07T10:30:19+04:00',
+    recurrence: { start: { value: '20260907T093017', tzid: 'Europe/Amsterdam' }, duration: 'PT1H2S', timezones: [definition] } };
+  for (const scope of ['series', 'occurrence', 'override']) {
+    const effective = { start: redefined.recurrence.start, duration: 'PT1H2S' };
+    const projected = { ...redefined, recurrence_id: effective.start, recurrence: effective };
+    const series = scope === 'override' ? { ...master, recurrence: {
+      overrides: [{ recurrence_id: effective.start, event: redefined }] } } : redefined;
+    await open({ event: series, ...(scope === 'series' ? {} : { occurrence: { ...projected, is_override: scope === 'override' } }) });
+    assert.equal(await value('Time zone'), 'UTC');
+    assert.equal(await value('Start time'), '05:30:17', 'Never format a redefined IANA name with browser rules');
+    assert.match(await page.getByRole('status').textContent(), /custom calendar time zone/);
+    for (const label of ['Time zone', 'Start date', 'End date', 'Start time', 'End time', 'All-day event']) {
+      assert.equal(await page.getByLabel(label, { exact: true }).isDisabled(), true);
+    }
+    result = await save(true);
+    const event = scope === 'series' ? result : result.recurrence.overrides[0].event;
+    assert.equal(event.date_from, redefined.date_from);
+    assert.equal(event.date_to, redefined.date_to);
+    assert.equal(event.tz, redefined.tz);
+    assert.deepEqual(event.recurrence, scope === 'occurrence' ? effective : redefined.recurrence);
+    if (scope === 'occurrence') assert.deepEqual(result.recurrence.timezones, [definition]);
+  }
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await open({ event: master, occurrence });
+    assert(await page.getByRole('dialog').evaluate(el => el.scrollWidth <= el.clientWidth));
+    await page.getByLabel('Edit scope').selectOption('series');
+    assert(await page.getByRole('dialog').evaluate(el => el.scrollWidth <= el.clientWidth));
+  }
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: editor dates/DST, groups/new names/no group, all supported FUNC presets, lossless custom/mixed recurrence, loading/errors, desktop/mobile selection and overflow.',
+    'PASS: editor dates/DST/seconds, groups, FUNC and sub-daily presets, scope/move/cancel/reset/restore, lossless imported metadata/custom zones, loading/errors and desktop/mobile overflow.',
   );
 } finally {
   await browser?.close();

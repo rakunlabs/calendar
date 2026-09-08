@@ -8,7 +8,12 @@ import (
 	"github.com/rakunlabs/logi"
 	"github.com/rakunlabs/tell"
 
+	_ "github.com/rakunlabs/chu/loader/external/loaderawssecrets"
+	_ "github.com/rakunlabs/chu/loader/external/loaderawsssm"
+	_ "github.com/rakunlabs/chu/loader/external/loaderazurekeyvault"
 	_ "github.com/rakunlabs/chu/loader/external/loaderconsul"
+	_ "github.com/rakunlabs/chu/loader/external/loadergcpparameter"
+	_ "github.com/rakunlabs/chu/loader/external/loadergcpsecret"
 	_ "github.com/rakunlabs/chu/loader/external/loadervault"
 )
 
@@ -23,6 +28,7 @@ var (
 type Config struct {
 	LogLevel string `cfg:"log_level" default:"info"`
 	Port     uint   `cfg:"port"      default:"8080"`
+	BasePath string `cfg:"base_path" default:"/calendar"`
 
 	DBType       string `cfg:"db_type"       default:"pgx"`
 	DBDataSource string `cfg:"db_datasource" log:"false"`

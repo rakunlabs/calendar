@@ -42,7 +42,7 @@ func TestGenerateICS(t *testing.T) {
 			},
 			want: "BEGIN:VCALENDAR\r\n" +
 				"VERSION:2.0\r\n" +
-				"PRODID:-//worldline-go//calendar//EN\r\n" +
+				"PRODID:-//rakunlabs//calendar//EN\r\n" +
 				"BEGIN:VEVENT\r\n" +
 				"UID:\r\n" +
 				"CATEGORIES:Holidays\r\n" +
@@ -161,9 +161,9 @@ func TestParseICSRejectsInvalidDuration(t *testing.T) {
 		{"timed negative duration", "DTSTART:20260101T090000Z\r\nDTEND:20260101T080000Z", "DTEND must be after DTSTART"},
 		{"all day zero duration", "DTSTART;VALUE=DATE:20260101\r\nDTEND;VALUE=DATE:20260101", "DTEND must be after DTSTART"},
 		{"all day negative duration", "DTSTART;VALUE=DATE:20260102\r\nDTEND;VALUE=DATE:20260101", "DTEND must be after DTSTART"},
-		{"timed DURATION", "DTSTART:20260101T090000Z\r\nDURATION:PT1H", "unsupported DURATION"},
-		{"all day DURATION", "DTSTART;VALUE=DATE:20260101\r\nDURATION:P2D", "unsupported DURATION"},
-		{"DURATION with end", "DTSTART:20260101T090000Z\r\nDTEND:20260101T100000Z\r\nDURATION:PT1H", "unsupported DURATION"},
+		{"invalid DURATION", "DTSTART:20260101T090000Z\r\nDURATION:P1M", "invalid DURATION"},
+		{"all day time DURATION", "DTSTART;VALUE=DATE:20260101\r\nDURATION:PT2H", "DATE DURATION"},
+		{"DURATION with end", "DTSTART:20260101T090000Z\r\nDTEND:20260101T100000Z\r\nDURATION:PT1H", "mutually exclusive"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			data := "BEGIN:VEVENT\r\nUID:invalid\r\n" + tt.dates + "\r\nEND:VEVENT"
@@ -241,6 +241,7 @@ END:VEVENT
 					Tz:          "Europe/Istanbul",
 					AllDay:      true,
 					RRule:       "",
+					Recurrence:  &models.Recurrence{Start: &models.CalendarDate{Value: "20240519", Type: "DATE"}, End: &models.CalendarDate{Value: "20240520", Type: "DATE"}},
 					Disabled:    false,
 				},
 			},
@@ -264,4 +265,84 @@ END:VEVENT
 			}
 		})
 	}
+}
+
+func TestICSCaseInsensitiveNames(t *testing.T) {
+	data := "begin:vcalendar\r\nbEgIn:vEvEnT\r\n" +
+		"uid:CaseSensitive-ID\r\n" +
+		"sUmMaRy;language=en-US;ALTREP=\"https://example.com/a;b\":  Mixed Case: title  \r\n" +
+		"description;language=en-US:Keep Mixed Case\\NSecond line\r\n" +
+		"dtstart;tzid=America/New_York;value=DATE-TIME:20260101T090000\r\n" +
+		"dtend;TzId=\"America/New_York\":20260101T100000\r\n" +
+		"rrule:FREQ=DAILY;COUNT=2\r\nend:vevent\r\nend:vcalendar"
+	events, err := ParseICS(strings.NewReader(data), nil)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, "CaseSensitive-ID", events[0].ID)
+	require.Equal(t, "  Mixed Case: title  ", events[0].Name)
+	require.Equal(t, "Keep Mixed Case\nSecond line", events[0].Description)
+	require.Equal(t, "America/New_York", events[0].Tz)
+	require.Equal(t, 9, events[0].DateFrom.Hour())
+	require.Equal(t, "RRULE:FREQ=DAILY;COUNT=2", events[0].RRule)
+
+	for _, property := range []string{
+		"exdate:invalid", "rdate;value=DATE:20260103",
+		"recurrence-id:20260101T090000Z", "ExDaTe;tzid=Invalid/Zone:20260102T090000",
+		"duration:PT1H", "rrule:FREQ=DAILY\r\nRrUlE:FREQ=YEARLY",
+	} {
+		t.Run(property, func(t *testing.T) {
+			data := "BEGIN:VEVENT\r\nDTSTART:20260101T090000Z\r\nDTEND:20260101T100000Z\r\n" + property + "\r\nEND:VEVENT"
+			events, err := ParseICS(strings.NewReader(data), nil)
+			require.Error(t, err)
+			require.Nil(t, events)
+		})
+	}
+
+	t.Run("lowercase DATE parameter name", func(t *testing.T) {
+		events, err := ParseICS(strings.NewReader("begin:vevent\ndtstart;value=DATE:20260101\nend:vevent"), nil)
+		require.NoError(t, err)
+		require.Len(t, events, 1)
+		require.True(t, events[0].AllDay)
+	})
+	t.Run("TZID value remains case sensitive", func(t *testing.T) {
+		_, err := ParseICS(strings.NewReader(strings.ReplaceAll(data, "America/New_York", "america/new_york")), nil)
+		require.Error(t, err)
+	})
+	t.Run("property names match exactly", func(t *testing.T) {
+		_, err := ParseICS(strings.NewReader("BEGIN:VEVENT\nDTSTART-OTHER:20260101T090000Z\nDTEND:20260101T100000Z\nEND:VEVENT"), nil)
+		require.ErrorContains(t, err, "missing or invalid DTSTART")
+	})
+}
+
+func TestICSTextEscapes(t *testing.T) {
+	for _, tt := range []struct{ input, want string }{
+		{`\n`, "\n"}, {`\N`, "\n"}, {`\\n`, `\n`}, {`\\N`, `\N`},
+		{`\\\n`, "\\\n"}, {`\,\;\\`, ",;\\"}, {`\x`, `\x`}, {`end\`, `end\`},
+	} {
+		require.Equal(t, tt.want, unescapeICS(tt.input), tt.input)
+	}
+	for _, text := range []string{
+		`literal \n and \N`, "newline\nand another\n", `commas, semicolons; backslash\`,
+		`LANGUAGE=en:This is literal text`, "  padded text  ", "\\\n\\N\\n",
+	} {
+		t.Run(text, func(t *testing.T) {
+			require.Equal(t, text, unescapeICS(escapeICS(text)))
+			start := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
+			event := models.Event{Name: text, Description: text, DateFrom: types.Time{Time: start}, DateTo: types.Time{Time: start.Add(time.Hour)}}
+			data, err := GenerateICS([]models.Event{event}, "")
+			require.NoError(t, err)
+			events, err := ParseICS(strings.NewReader(data), nil)
+			require.NoError(t, err)
+			require.Len(t, events, 1)
+			require.Equal(t, text, events[0].Name)
+			require.Equal(t, text, events[0].Description)
+		})
+	}
+}
+
+func TestGenerateICSLowercaseRRuleProperty(t *testing.T) {
+	start := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
+	data, err := GenerateICS([]models.Event{{DateFrom: types.Time{Time: start}, DateTo: types.Time{Time: start.Add(time.Hour)}, RRule: "rrule:FREQ=DAILY;COUNT=2"}}, "")
+	require.NoError(t, err)
+	require.Contains(t, data, "\r\nRRULE:FREQ=DAILY;COUNT=2\r\n")
 }

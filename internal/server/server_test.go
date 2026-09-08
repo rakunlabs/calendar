@@ -90,7 +90,7 @@ func (f *fakeService) GetEventsICS(_ context.Context, q *query.Query) ([]domain.
 
 func request(t *testing.T, f *fakeService, method, path, body, user string) *httptest.ResponseRecorder {
 	t.Helper()
-	s, err := NewServer(context.Background(), f)
+	s, err := NewServer(context.Background(), f, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func assertJSON(t *testing.T, w *httptest.ResponseRecorder, code int, want strin
 
 func TestRecoveryMiddleware(t *testing.T) {
 	t.Run("middleware panic", func(t *testing.T) {
-		s, err := NewServer(context.Background(), &fakeService{})
+		s, err := NewServer(context.Background(), &fakeService{}, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -141,7 +141,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 	})
 
 	t.Run("HTTP error panic is redacted", func(t *testing.T) {
-		s, err := NewServer(context.Background(), &fakeService{})
+		s, err := NewServer(context.Background(), &fakeService{}, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -154,7 +154,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 	})
 
 	t.Run("partial response is not overwritten", func(t *testing.T) {
-		s, err := NewServer(context.Background(), &fakeService{})
+		s, err := NewServer(context.Background(), &fakeService{}, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -266,7 +266,7 @@ func TestListBindingContentType(t *testing.T) {
 		for _, contentType := range []string{"", "text/plain", "application/x-www-form-urlencoded", "application/json; charset=utf-8"} {
 			t.Run(path+"/"+contentType, func(t *testing.T) {
 				f := &fakeService{}
-				s, err := NewServer(context.Background(), f)
+				s, err := NewServer(context.Background(), f, "")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -375,7 +375,7 @@ func TestReadAndDeleteRoutes(t *testing.T) {
 
 func TestICSAndSwagger(t *testing.T) {
 	f := &fakeService{}
-	s, err := NewServer(context.Background(), f)
+	s, err := NewServer(context.Background(), f, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +426,7 @@ func TestICSAndSwagger(t *testing.T) {
 
 func TestMiddlewareAndHead(t *testing.T) {
 	f := &fakeService{}
-	s, err := NewServer(context.Background(), f)
+	s, err := NewServer(context.Background(), f, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,8 +11,11 @@ import (
 
 // RRule represents an RFC5545 section 3.3.10 recurrence rule.
 type RRule struct {
-	Freq       string
-	Until      *time.Time
+	Freq  string
+	Until *time.Time
+	// UntilType preserves parsed DATE, FLOATING, or UTC semantics. Empty means
+	// Until is an absolute instant, as in manually constructed rules.
+	UntilType  string
 	Count      *int
 	Interval   int
 	BySecond   []int
@@ -47,11 +50,23 @@ func ParseRRule(s string) (*RRule, error) {
 		case "FREQ":
 			r.Freq = strings.ToUpper(val)
 		case "UNTIL":
-			t, err := parseTime(val)
+			untilValue := val
+			if (len(val) == 15 || len(val) == 16) && val[13:15] == "60" {
+				untilValue = val[:13] + "59" + val[15:]
+			}
+			t, err := parseTime(untilValue)
 			if err != nil {
 				return nil, fmt.Errorf("invalid UNTIL: %w", err)
 			}
 			r.Until = &t
+			switch len(val) {
+			case 8:
+				r.UntilType = "DATE"
+			case 15:
+				r.UntilType = "FLOATING"
+			default:
+				r.UntilType = "UTC"
+			}
 		case "COUNT", "INTERVAL":
 			n, err := strconv.Atoi(val)
 			if err != nil || n < 1 || n > 2147483647 {
@@ -173,8 +188,7 @@ func validWeekday(s string) bool {
 }
 
 // parseTime parses RFC5545 UTC/local DATE-TIME or DATE values. Zone-less
-// values retain the UTC interpretation used by the former StrToROption path;
-// they are not reinterpreted in DTSTART's location during iteration.
+// values use UTC as civil-field storage; UntilType governs their interpretation.
 func parseTime(s string) (time.Time, error) {
 	if len(s) == 16 && strings.HasSuffix(s, "Z") {
 		return time.Parse("20060102T150405Z", s)
@@ -195,7 +209,7 @@ func MatchRRuleAt(r *RRule, dtstart, dtend, search time.Time) (a, b time.Time, f
 	if dtend.IsZero() || duration <= 0 {
 		return
 	}
-	err := walkRRule(context.Background(), r, dtstart, search, func(candidate time.Time) bool {
+	err := walkRRuleFrom(context.Background(), r, dtstart, search.Add(-duration), search, func(candidate time.Time) bool {
 		end := candidate.Add(duration)
 		if !search.Before(candidate) && search.Before(end) {
 			a, b, found = candidate, end, true
@@ -218,7 +232,7 @@ func MatchRRuleBetween(r *RRule, dtstart, dtend, dateFrom, dateTo time.Time) (a,
 	if !dtend.IsZero() && dtend.After(dtstart) {
 		duration = dtend.Sub(dtstart)
 	}
-	err := walkRRule(context.Background(), r, dtstart, dateTo, func(candidate time.Time) bool {
+	err := walkRRuleFrom(context.Background(), r, dtstart, dateFrom.Add(-duration), dateTo, func(candidate time.Time) bool {
 		end := candidate.Add(duration)
 		if !end.Before(dateFrom) {
 			a, b, found = candidate, end, true

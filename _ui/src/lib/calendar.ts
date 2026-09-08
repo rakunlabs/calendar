@@ -8,6 +8,15 @@ export const dayKey = (date: Date) => format(date, 'yyyy-MM-dd');
 export const groupName = (event: CalendarEvent) => event.event_group || 'Ungrouped';
 export const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
+export function safeZone(zone: string) {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: zone });
+    return zone;
+  } catch {
+    return 'UTC';
+  }
+}
+
 export function monthDays(date: Date, fixed = true) {
   const first = startOfWeek(startOfMonth(date), { weekStartsOn: 1 });
   const count = fixed
@@ -30,7 +39,7 @@ export function viewRange(date: Date, view: View): [Date, Date] {
 export function occursOn(event: CalendarEvent, day: Date) {
   // All-day entries follow their event-zone dates, not the browser's UTC offset.
   if (event.all_day) {
-    const zone = event.tz || 'UTC';
+    const zone = safeZone(event.tz || 'UTC');
     const key = dayKey(day);
     return (
       formatInTimeZone(event.date_from, zone, 'yyyy-MM-dd') <= key &&
@@ -47,14 +56,14 @@ export function colorFor(group: string): number {
 }
 
 export function dateInput(value: string, zone: string, allDay: boolean) {
-  return formatInTimeZone(value, zone, allDay ? 'yyyy-MM-dd' : "yyyy-MM-dd'T'HH:mm");
+  return formatInTimeZone(value, safeZone(zone), allDay ? 'yyyy-MM-dd' : "yyyy-MM-dd'T'HH:mm:ss");
 }
 
 export function toInstant(value: string, zone: string) {
   const instant = fromZonedTime(value.length === 10 ? `${value}T00:00` : value, zone);
   if (Number.isNaN(instant.getTime())) throw new Error('Enter a valid date and IANA time zone.');
   // Nonexistent wall-clock times during the spring DST transition must not shift silently.
-  const expected = value.length === 10 ? value : value.slice(0, 16);
+  const expected = value.length === 16 ? `${value}:00` : value;
   if (dateInput(instant.toISOString(), zone, value.length === 10) !== expected)
     throw new Error('This time does not exist in the selected time zone (daylight saving transition).');
   return instant.toISOString();

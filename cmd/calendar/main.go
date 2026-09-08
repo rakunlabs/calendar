@@ -69,7 +69,7 @@ func run(ctx context.Context) error {
 
 	// ///////////////////////////////////////////////////////
 	// server initialize
-	srv, err := server.NewServer(ctx, svc)
+	srv, err := server.NewServer(ctx, svc, cfg.BasePath)
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
 	}

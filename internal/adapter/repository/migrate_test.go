@@ -20,7 +20,7 @@ func TestMigrateDB(t *testing.T) {
 	defer container.Stop(t)
 	db := container.Sql()
 
-	for _, version := range []int{0, 1, 2} {
+	for _, version := range []int{0, 1, 2, 3} {
 		t.Run(fmt.Sprintf("existing_version_%d", version), func(t *testing.T) {
 			schema := fmt.Sprintf("migration_test_%d", version)
 			quotedSchema := pgx.Identifier{schema}.Sanitize()
@@ -48,7 +48,7 @@ func TestMigrateDB(t *testing.T) {
 					PRIMARY KEY (path, version)
 				)`)
 				require.NoError(t, err)
-				for i, file := range []string{"01_events.sql", "02_relations.sql"}[:version] {
+				for i, file := range []string{"01_events.sql", "02_relations.sql", "03_relation_uniqueness.sql"}[:version] {
 					content, err := migrationFS.ReadFile("migrations/" + file)
 					require.NoError(t, err)
 					_, err = tx.ExecContext(t.Context(), string(content))
@@ -70,6 +70,10 @@ func TestMigrateDB(t *testing.T) {
 						('x', 'g', 'e', '2026-01-01Z', 'latest')`)
 					require.NoError(t, err)
 				}
+				if version != 2 {
+					_, err = tx.ExecContext(t.Context(), `INSERT INTO calendar_events (id, name, date_from, date_to) VALUES ('e', 'event', NOW(), NOW())`)
+					require.NoError(t, err)
+				}
 				// The shipped SQL is mostly idempotent; this comment detects replay.
 				_, err = tx.ExecContext(t.Context(), `COMMENT ON COLUMN calendar_events.rrule IS 'do not replay'`)
 				require.NoError(t, err)
@@ -89,10 +93,10 @@ func TestMigrateDB(t *testing.T) {
 				}
 				require.NoError(t, rows.Err())
 				require.NoError(t, rows.Close())
-				require.Equal(t, []int{1, 2, 3}, versions)
+				require.Equal(t, []int{1, 2, 3, 4}, versions)
 				var count int
 				require.NoError(t, db.QueryRowContext(t.Context(), "SELECT count(*) FROM "+history).Scan(&count))
-				require.Equal(t, 3, count)
+				require.Equal(t, 4, count)
 				require.NoError(t, db.QueryRowContext(t.Context(), "SELECT count(*) FROM "+quotedSchema+".calendar_events").Scan(&count))
 				require.NoError(t, db.QueryRowContext(t.Context(), "SELECT count(*) FROM "+quotedSchema+".calendar_relations").Scan(&count))
 				if version == 2 {
@@ -101,6 +105,8 @@ func TestMigrateDB(t *testing.T) {
 					require.Equal(t, 4, count)
 				}
 				if version > 0 {
+					require.NoError(t, db.QueryRowContext(t.Context(), "SELECT count(*) FROM "+quotedSchema+".calendar_events WHERE id = 'e' AND recurrence IS NULL").Scan(&count))
+					require.Equal(t, 1, count)
 					var comment string
 					require.NoError(t, db.QueryRowContext(t.Context(), `SELECT col_description($1::regclass, attnum) FROM pg_attribute WHERE attrelid = $1::regclass AND attname = 'rrule'`, schema+".calendar_events").Scan(&comment))
 					require.Equal(t, "do not replay", comment)

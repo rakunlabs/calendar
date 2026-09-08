@@ -5,6 +5,10 @@ import (
 )
 
 type (
-	Event    = domain.Event
-	Relation = domain.Relation
+	Event              = domain.Event
+	Relation           = domain.Relation
+	CalendarDate       = domain.CalendarDate
+	RecurrencePeriod   = domain.RecurrencePeriod
+	OccurrenceOverride = domain.OccurrenceOverride
+	Recurrence         = domain.Recurrence
 )

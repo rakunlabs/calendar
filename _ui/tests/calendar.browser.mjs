@@ -343,8 +343,56 @@ try {
   await cancel();
   await expect(page.locator('.sidebar').getByRole('checkbox', { name: /Later page group/ })).toBeVisible();
   assert(requests.some(url => url.includes('_offset=200')));
+  await page.unroute('**/v1/**');
+  const occurrenceDay = await page.locator('.month-cell:not(.other-month)').nth(8).getAttribute('data-date');
+  const recurrenceID = { value: `${occurrenceDay.replaceAll('-', '')}T090017Z` };
+  let master = { id: 'recurring', name: 'Recurring fixture', description: '', event_group: 'Team',
+    date_from: '2025-01-01T09:00:17Z', date_to: '2025-01-01T10:00:19Z',
+    tz: 'UTC', all_day: false, rrule: 'RRULE:FREQ=DAILY', disabled: false,
+    updated_at: '2026-01-01T00:00:00Z', recurrence: { start: { value: '20250101T090017Z' }, duration: 'PT1H2S' } };
+  let listReads = 0;
+  let lastWrite;
+  await page.route('**/v1/**', route => {
+    const url = new URL(route.request().url());
+    if (route.request().method() === 'PUT') {
+      lastWrite = route.request().postDataJSON();
+      assert.equal(lastWrite.updated_at, master.updated_at, 'Every save uses the refetched revision');
+      master = { ...lastWrite, updated_at: '2026-01-02T00:00:00Z' };
+      return route.fulfill({ json: { payload: null } });
+    }
+    if (url.pathname.endsWith('/relations')) return route.fulfill({ json: { payload: [] } });
+    if (url.pathname.endsWith('/occurrences')) {
+      const cancelled = master.recurrence.overrides?.some(o => o.cancelled);
+      return route.fulfill({ json: { payload: cancelled ? [] : [{ ...master, recurrence_id: recurrenceID,
+        recurrence: { start: recurrenceID, duration: 'PT1H2S' },
+        date_from: `${occurrenceDay}T09:00:17Z`, date_to: `${occurrenceDay}T10:00:19Z` }] } });
+    }
+    listReads++;
+    return route.fulfill({ json: { payload: [master] } });
+  });
+  await page.reload();
+  await page.locator('.event-chip').filter({ hasText: 'Recurring fixture' }).first().click();
+  await expect(page.getByLabel('Edit scope')).toHaveValue('occurrence');
+  await expect(page.getByLabel('Start date', { exact: true })).toHaveValue(occurrenceDay);
+  await page.getByLabel('Edit scope').selectOption('series');
+  await expect(page.getByLabel('Start date', { exact: true })).toHaveValue('2025-01-01');
+  await page.getByLabel('Edit scope').selectOption('occurrence');
+  await page.getByRole('button', { name: 'Cancel occurrence', exact: true }).click();
+  const readsBeforeSave = listReads;
+  await page.getByRole('button', { name: 'Confirm cancellation' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect.poll(() => listReads).toBeGreaterThan(readsBeforeSave);
+  assert.equal(lastWrite.date_from, '2025-01-01T09:00:17Z');
+  await expect(page.locator('.event-chip')).toHaveCount(0);
+  await page.getByText('Series exceptions', { exact: true }).click();
+  await page.locator('.sidebar').getByRole('button', { name: 'Recurring fixture', exact: true }).click();
+  await page.getByText('Occurrence exceptions (1)', { exact: true }).click();
+  await page.getByRole('button', { name: `Restore ${recurrenceID.value}` }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.locator('.event-chip').filter({ hasText: 'Recurring fixture' }).first()).toBeVisible();
+  assert.deepEqual(lastWrite.recurrence.overrides, []);
   assert.deepEqual(errors, []);
-  console.log('PASS: calendar interactions/mobile overflow; paginated groups including disabled/out-of-range events, catalog failure and editor retry.');
+  console.log('PASS: calendar interactions/mobile overflow, paginated groups, catalog retry, retained occurrence/master, save refetch and cancelled-series restore with fresh revision.');
 } finally {
   await browser?.close();
   await server.close();

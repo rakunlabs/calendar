@@ -6,6 +6,40 @@ import (
 	"time"
 )
 
+func TestParseRRuleUntilMetadata(t *testing.T) {
+	for _, tt := range []struct {
+		value, kind string
+	}{
+		{"20241027", "DATE"},
+		{"20241027T023000", "FLOATING"},
+		{"20241027T023000Z", "UTC"},
+	} {
+		r, err := ParseRRule("FREQ=DAILY;UNTIL=" + tt.value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Until == nil || r.UntilType != tt.kind {
+			t.Fatalf("%s: Until=%v UntilType=%q", tt.value, r.Until, r.UntilType)
+		}
+		if r.Until.Year() != 2024 || r.Until.Month() != time.October || r.Until.Day() != 27 {
+			t.Fatalf("civil fields lost: %v", r.Until)
+		}
+	}
+}
+
+func TestParseRRuleUntilLeapSecond(t *testing.T) {
+	for _, suffix := range []string{"", "Z"} {
+		text := "FREQ=SECONDLY;BYSECOND=60;UNTIL=20241231T235960" + suffix
+		r, err := ParseRRule(text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Org() != text || r.Until.Second() != 59 || r.Until.Minute() != 59 || r.Until.Day() != 31 || !reflect.DeepEqual(r.BySecond, []int{60}) {
+			t.Fatalf("fallback changed rule text or civil fields: %+v", r)
+		}
+	}
+}
+
 func TestMatchRRuleAt(t *testing.T) {
 	locationNewYork, err := time.LoadLocation("America/New_York")
 	if err != nil {

@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/doug-martin/goqu/v9"
+	"github.com/rakunlabs/calendar/internal/core/port"
+	"github.com/rakunlabs/calendar/internal/core/service"
 	"github.com/rakunlabs/calendar/pkg/models"
 	"github.com/rakunlabs/query"
 	"github.com/stretchr/testify/suite"
@@ -17,6 +19,7 @@ var migrations = []string{
 	"migrations/01_events.sql",
 	"migrations/02_relations.sql",
 	"migrations/03_relation_uniqueness.sql",
+	"migrations/04_recurrence.sql",
 }
 
 type DatabaseSuite struct {
@@ -196,7 +199,7 @@ func (s *DatabaseSuite) TestAddEvents() {
 	s.Require().Equal(events[0].DateTo.Local(), result[0].DateTo.Local(), "DateTo wrong")
 	s.Require().Equal(events[0].RRule, result[0].RRule)
 	s.Require().Equal(events[0].Disabled, result[0].Disabled)
-	s.Require().Equal(events[0].UpdatedAt.Truncate(time.Millisecond), result[0].UpdatedAt.Truncate(time.Millisecond), "UpdatedAt wrong")
+	s.Require().True(events[0].UpdatedAt.Equal(result[0].UpdatedAt.Time), "UpdatedAt wrong")
 	s.Require().Equal(events[0].UpdatedBy, result[0].UpdatedBy)
 
 	// remove events
@@ -260,6 +263,124 @@ func (s *DatabaseSuite) TestGetEventNotFound() {
 	got, err := s.db.GetEvent(s.T().Context(), "non-existent-id")
 	s.Require().NoError(err)
 	s.Require().Nil(got)
+}
+
+func (s *DatabaseSuite) TestRecurrenceRoundTripAndOptimisticUpdate() {
+	ctx := s.T().Context()
+	start := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
+	date := models.CalendarDate{Value: "20260101T090000Z"}
+	end := models.CalendarDate{Value: "20260101T100000Z"}
+	events := []models.Event{{ID: "recurrence-roundtrip", Name: "master", Disabled: true,
+		EventGroup: types.NewNull("recurrence-group"), Tz: "UTC", RRule: "FREQ=DAILY;COUNT=3",
+		DateFrom: types.Time{Time: start}, DateTo: types.Time{Time: start.Add(time.Hour)},
+		RecurrenceID: &date, IsOverride: true,
+		Recurrence: &models.Recurrence{Start: &date, End: &end,
+			ExDates:   []models.CalendarDate{{Value: "20260102T090000Z"}},
+			RDates:    []models.RecurrencePeriod{{Start: date, End: &end}, {Start: date, Duration: "PT2H"}},
+			Timezones: []string{"BEGIN:VTIMEZONE\r\nTZID:Custom\r\nEND:VTIMEZONE"},
+			Overrides: []models.OccurrenceOverride{{RecurrenceID: date, Event: &models.Event{
+				Name: "moved", EventGroup: types.Null[string]{ParsedNull: true}, Tz: "UTC", DateFrom: types.Time{Time: start.Add(time.Hour)}, DateTo: types.Time{Time: start.Add(2 * time.Hour)},
+				Recurrence: &models.Recurrence{Start: &end},
+			}}, {RecurrenceID: end, Cancelled: true}},
+		}}, {ID: "recurrence-null", DateFrom: types.Time{Time: start}, DateTo: types.Time{Time: start.Add(time.Hour)}}}
+	s.Require().NoError(s.db.AddEvents(ctx, events))
+	defer s.db.RemoveEvent(ctx, events[0].ID, events[1].ID)
+	got, err := s.db.GetEvent(ctx, events[0].ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(got)
+	s.Equal(events[0].Recurrence, got.Recurrence)
+	s.Nil(got.RecurrenceID)
+	s.False(got.IsOverride)
+	s.True(got.Disabled)
+	s.Equal(events[0].EventGroup, got.EventGroup)
+	q, err := query.Parse("id[in]=recurrence-roundtrip,recurrence-null")
+	s.Require().NoError(err)
+	listed, err := s.db.GetEvents(ctx, q)
+	s.Require().NoError(err)
+	s.Len(listed, 2)
+	s.Require().NoError(s.db.GetEventsWithFunc(ctx, q, func(event models.Event) error {
+		if event.ID == events[0].ID {
+			s.Equal(events[0].Recurrence, event.Recurrence)
+		} else {
+			s.Nil(event.Recurrence)
+		}
+		return nil
+	}))
+	stale := *got
+	got.Name = "winner"
+	s.Require().NoError(s.db.UpdateEvent(ctx, got.ID, got))
+	s.True(got.UpdatedAt.After(stale.UpdatedAt.Time))
+	s.ErrorIs(s.db.UpdateEvent(ctx, stale.ID, &stale), port.ErrConflict)
+	stale.Recurrence = nil
+	s.ErrorIs(s.db.UpdateEvent(ctx, stale.ID, &stale), port.ErrConflict)
+	latest, err := s.db.GetEvent(ctx, got.ID)
+	s.Require().NoError(err)
+	s.Equal("winner", latest.Name)
+	s.Equal(events[0].Recurrence, latest.Recurrence)
+	s.True(got.UpdatedAt.Equal(latest.UpdatedAt.Time))
+}
+
+func (s *DatabaseSuite) TestRecurrenceServiceEditsAndConcurrentWriters() {
+	ctx := s.T().Context()
+	start := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
+	events := []models.Event{{ID: "recurrence-edits", Name: "master", Tz: "UTC", RRule: "FREQ=DAILY;COUNT=2",
+		DateFrom: types.Time{Time: start}, DateTo: types.Time{Time: start.Add(time.Hour)},
+		Recurrence: &models.Recurrence{Start: &models.CalendarDate{Value: "20260101T090000Z"}, End: &models.CalendarDate{Value: "20260101T100000Z"}},
+	}}
+	s.Require().NoError(s.db.AddEvents(ctx, events))
+	defer s.db.RemoveEvent(ctx, events[0].ID)
+	svc, err := service.NewCalendarService(ctx, s.db)
+	s.Require().NoError(err)
+	master, err := svc.GetEvent(ctx, events[0].ID)
+	s.Require().NoError(err)
+	detached := *master
+	detached.Recurrence = nil
+	detached.RRule = ""
+	detached.Name = "edited occurrence"
+	detached.DateFrom.Time = start.AddDate(0, 0, 1).Add(time.Hour)
+	detached.DateTo.Time = detached.DateFrom.Add(time.Hour)
+	master.Recurrence.Overrides = []models.OccurrenceOverride{{RecurrenceID: models.CalendarDate{Value: "20260102T090000Z"}, Event: &detached}}
+	s.Require().NoError(svc.UpdateEvent(ctx, master.ID, master))
+	legacy := *master
+	legacy.Recurrence = nil
+	legacy.Name = "legacy rename"
+	s.Require().NoError(svc.UpdateEvent(ctx, master.ID, &legacy))
+	s.Require().Len(legacy.Recurrence.Overrides, 1)
+	s.Equal("edited occurrence", legacy.Recurrence.Overrides[0].Event.Name)
+	legacy.Recurrence.Overrides[0].Cancelled = true
+	legacy.Recurrence.Overrides[0].Event = nil
+	s.Require().NoError(svc.UpdateEvent(ctx, master.ID, &legacy))
+	legacy.Recurrence.Overrides = nil
+	s.Require().NoError(svc.UpdateEvent(ctx, master.ID, &legacy))
+	writers := make([]*models.Event, 2)
+	for i := range writers {
+		writers[i], err = svc.GetEvent(ctx, master.ID)
+		s.Require().NoError(err)
+		writers[i].Recurrence.Overrides = []models.OccurrenceOverride{{RecurrenceID: models.CalendarDate{Value: "20260102T090000Z"}, Cancelled: true}}
+	}
+	results := make(chan error, 2)
+	barrier := make(chan struct{})
+	for _, writer := range writers {
+		go func() { <-barrier; results <- s.db.UpdateEvent(ctx, writer.ID, writer) }()
+	}
+	close(barrier)
+	var successes, conflicts int
+	for range writers {
+		err := <-results
+		if err == nil {
+			successes++
+		} else {
+			s.ErrorIs(err, port.ErrConflict)
+			conflicts++
+		}
+	}
+	s.Equal(1, successes)
+	s.Equal(1, conflicts)
+	got, err := svc.GetEvent(ctx, master.ID)
+	s.Require().NoError(err)
+	s.Equal("legacy rename", got.Name)
+	s.Require().Len(got.Recurrence.Overrides, 1)
+	s.True(got.Recurrence.Overrides[0].Cancelled)
 }
 
 func (s *DatabaseSuite) TestAddMultipleEvents() {

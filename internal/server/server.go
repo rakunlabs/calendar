@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/rakunlabs/ada"
 	"github.com/rakunlabs/ada/handler/swagger"
@@ -22,7 +23,15 @@ import (
 
 // @title calendar API
 // @BasePath /calendar/v1
-func NewServer(_ context.Context, svc port.CalendarService) (*ada.Server, error) {
+func NewServer(_ context.Context, svc port.CalendarService, basePath string) (*ada.Server, error) {
+	basePath = strings.TrimSpace(basePath)
+	if basePath == "" {
+		basePath = "/calendar"
+	}
+	prefix := strings.Trim(basePath, "/")
+	if prefix != "" {
+		prefix = "/" + prefix
+	}
 	handleHTTP, err := handler.NewHTTP(svc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create http handler: %w", err)
@@ -41,19 +50,25 @@ func NewServer(_ context.Context, svc port.CalendarService) (*ada.Server, error)
 		mtelemetry.Middleware(),
 	)
 	s.ErrorHandler(handler.HTTPErrorHandler)
-	calendar := s.Group("/calendar")
-	calendar.NotFound(s.Wrap(func(c *ada.Context) error {
-		return ada.NewHTTPError(http.StatusNotFound, "Not Found")
-	}))
+
+	calendar := s.Group(prefix)
 	calendar.MethodNotAllowed(s.Wrap(func(c *ada.Context) error {
 		return ada.NewHTTPError(http.StatusMethodNotAllowed, "Method Not Allowed")
 	}))
+
 	calendar.HandleFunc("/swagger/*", swagger.Handler(
 		swagger.WithTitle(config.ServiceName),
 		swagger.WithVersion(config.ServiceVersion),
+		swagger.WithBasePath(prefix+"/v1"),
 	))
-	handleHTTP.RegisterRoutes(calendar.Group("/v1"))
-	if err := registerUI(s); err != nil {
+
+	api := calendar.Group("/v1")
+	api.NotFound(s.Wrap(func(c *ada.Context) error {
+		return ada.NewHTTPError(http.StatusNotFound, "Not Found")
+	}))
+
+	handleHTTP.RegisterRoutes(api)
+	if err := registerUI(calendar, prefix); err != nil {
 		return nil, err
 	}
 

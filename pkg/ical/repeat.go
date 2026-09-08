@@ -14,7 +14,8 @@ type Repeat struct {
 }
 
 // ParseRepeat parses a repeat string and returns a Repeat struct.
-// The repeat string can be in the format of "RRULE:FREQ=DAILY;INTERVAL=1" or "FUNC:GoodFriday" or both with space/new line.
+// Accepts bare FREQ= values, RRULE: values, and FUNC: names separated by whitespace.
+// Prefixes and function names are case-insensitive.
 func ParseRepeat(rruleStr string) (*Repeat, error) {
 	var rrule Repeat
 	// Split the string by space or new line
@@ -24,15 +25,19 @@ func ParseRepeat(rruleStr string) (*Repeat, error) {
 	}
 
 	for _, part := range parts {
-		if strings.HasPrefix(part, "RRULE:") {
-			rruleStr := strings.TrimPrefix(part, "RRULE:")
+		upper := strings.ToUpper(part)
+		if strings.HasPrefix(upper, "RRULE:") || strings.HasPrefix(upper, "FREQ=") {
+			rruleStr := part
+			if strings.HasPrefix(upper, "RRULE:") {
+				rruleStr = part[len("RRULE:"):]
+			}
 			rule, err := ParseRRule(rruleStr)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse rrule: %w", err)
 			}
 			rrule.RRule = append(rrule.RRule, rule)
-		} else if strings.HasPrefix(part, "FUNC:") {
-			funcName := strings.TrimPrefix(part, "FUNC:")
+		} else if strings.HasPrefix(upper, "FUNC:") {
+			funcName := part[len("FUNC:"):]
 			if fn, ok := special.GetFunc(funcName); ok {
 				rrule.Func = append(rrule.Func, fn)
 			} else {

@@ -16,8 +16,11 @@ type Event struct {
 	Tz       string     `db:"tz"        json:"tz"`
 	AllDay   bool       `db:"all_day"   json:"all_day"`
 
-	RRule    string `db:"rrule"    json:"rrule"`
-	Disabled bool   `db:"disabled" json:"disabled"`
+	RRule        string        `db:"rrule"    json:"rrule"`
+	Recurrence   *Recurrence   `db:"recurrence" json:"recurrence,omitempty" goqu:"omitnil"`
+	RecurrenceID *CalendarDate `db:"-" goqu:"skipinsert,skipupdate" json:"recurrence_id,omitempty"`
+	IsOverride   bool          `db:"-" goqu:"skipinsert,skipupdate" json:"is_override,omitempty"`
+	Disabled     bool          `db:"disabled" json:"disabled"`
 
 	UpdatedAt types.Time `db:"updated_at" json:"updated_at"`
 	UpdatedBy string     `db:"updated_by" json:"updated_by"`

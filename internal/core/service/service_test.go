@@ -102,6 +102,96 @@ func TestGetEventsICSFuncYearsAndMixedRules(t *testing.T) {
 	require.Empty(t, got[1].RRule)
 }
 
+func TestGetEventsFuncDateQuery(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	start := time.Date(2023, 4, 7, 9, 0, 0, 0, loc)
+	event := models.Event{ID: "timed", Tz: loc.String(), RRule: "func:GoodFriday",
+		DateFrom: types.Time{Time: start}, DateTo: types.Time{Time: start.Add(2 * time.Hour)}}
+	s, db := exportService(t, event)
+	for _, rule := range []string{"func:GoodFriday", "RRULE:FREQ=YEARLY;COUNT=1 FUNC:GoodFriday", "RRULE:FREQ=DAILY FUNC:GoodFriday FUNC:GoodFriday"} {
+		db.events[0].RRule = rule
+		for _, tt := range []struct {
+			date string
+			want int
+		}{
+			{"2024-03-29T15:00:00-04:00", 0},
+			{"2024-03-29T08:59:59-04:00", 0},
+			{"2024-03-29T09:00:00-04:00", 1},
+			{"2024-03-29T14:00:00Z", 1},
+			{"2024-03-29T11:00:00-04:00", 0},
+			{"2022-04-15T10:00:00-04:00", 0},
+		} {
+			t.Run(rule+"/"+tt.date, func(t *testing.T) {
+				q, err := query.Parse("date="+tt.date, query.WithSkipExpressionCmp("date"))
+				require.NoError(t, err)
+				got, err := s.GetEvents(t.Context(), q)
+				require.NoError(t, err)
+				require.Len(t, got, tt.want)
+				if tt.want > 0 {
+					require.Equal(t, time.Date(2024, 3, 29, 9, 0, 0, 0, loc), got[0].DateFrom.Time)
+					require.Equal(t, 2*time.Hour, got[0].DateTo.Sub(got[0].DateFrom.Time))
+					require.Equal(t, rule, got[0].RRule)
+				}
+			})
+		}
+	}
+	db.events[0].Tz = "Invalid/Zone"
+	q, err := query.Parse("date=2024-03-29", query.WithSkipExpressionCmp("date"))
+	require.NoError(t, err)
+	_, err = s.GetEvents(t.Context(), q)
+	require.ErrorContains(t, err, "Invalid/Zone")
+}
+
+func TestGetEventsICSFuncDurationAndAnchor(t *testing.T) {
+	loc, err := time.LoadLocation("Europe/Amsterdam")
+	require.NoError(t, err)
+	for _, allDay := range []bool{false, true} {
+		start := time.Date(2023, 4, 7, 9, 0, 0, 0, loc)
+		if allDay {
+			start = time.Date(2023, 4, 7, 0, 0, 0, 0, loc)
+		}
+		event := models.Event{ID: "holiday", Tz: loc.String(), AllDay: allDay, RRule: "func:GoodFriday",
+			DateFrom: types.Time{Time: start}, DateTo: types.Time{Time: start.AddDate(0, 0, 3)}}
+		s, db := exportService(t, event)
+		got, err := s.GetEventsICS(t.Context(), exportQuery(t, "year=2022,2024,2024"))
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		wantStart := time.Date(2024, 3, 29, start.Hour(), 0, 0, 0, loc)
+		wantEnd := wantStart.Add(72 * time.Hour)
+		if allDay {
+			wantEnd = wantStart.AddDate(0, 0, 3)
+			require.Equal(t, 71*time.Hour, wantEnd.Sub(wantStart))
+		}
+		require.Equal(t, wantStart, got[0].DateFrom.Time)
+		require.Equal(t, wantEnd, got[0].DateTo.Time)
+		require.Equal(t, allDay, got[0].AllDay)
+		require.Equal(t, "holiday-func-20240329", got[0].ID)
+		require.Empty(t, got[0].RRule)
+		data, err := ical.GenerateICS(got, "")
+		require.NoError(t, err)
+		roundTrip, err := ical.ParseICS(strings.NewReader(data), loc)
+		require.NoError(t, err)
+		require.Len(t, roundTrip, len(got))
+		require.Equal(t, got[0].ID, roundTrip[0].ID)
+		require.True(t, got[0].DateFrom.Equal(roundTrip[0].DateFrom.Time))
+		require.True(t, got[0].DateTo.Equal(roundTrip[0].DateTo.Time))
+		require.NotNil(t, roundTrip[0].Recurrence)
+
+		// A holiday earlier in the anchor year must also be excluded.
+		db.events[0].DateFrom.Time = start.AddDate(0, 0, 1)
+		db.events[0].DateTo.Time = start.AddDate(0, 0, 4)
+		got, err = s.GetEventsICS(t.Context(), exportQuery(t, "year=2023"))
+		require.NoError(t, err)
+		require.Empty(t, got)
+		q, err := query.Parse("date=2023-04-07T10:00:00Z", query.WithSkipExpressionCmp("date"))
+		require.NoError(t, err)
+		got, err = s.GetEvents(t.Context(), q)
+		require.NoError(t, err)
+		require.Empty(t, got)
+	}
+}
+
 func TestGetEventsICSRecurrenceWindow(t *testing.T) {
 	anchor := time.Date(2020, 1, 1, 9, 0, 0, 0, time.UTC)
 	for _, tt := range []struct {
@@ -163,7 +253,16 @@ func TestAddIcalExportRoundTrip(t *testing.T) {
 		group := types.Null[string]{V: "import-group", Valid: true}
 		require.NoError(t, s.AddIcal(t.Context(), strings.NewReader(data), loc, group, "user"))
 		event.EventGroup, event.UpdatedBy = group, "user"
-		require.Equal(t, []models.Event{event}, db.added)
+		require.Len(t, db.added, 1)
+		imported := db.added[0]
+		require.Equal(t, event.ID, imported.ID)
+		require.Equal(t, event.Name, imported.Name)
+		require.Equal(t, event.EventGroup, imported.EventGroup)
+		require.Equal(t, event.UpdatedBy, imported.UpdatedBy)
+		require.Equal(t, event.AllDay, imported.AllDay)
+		require.True(t, event.DateFrom.Equal(imported.DateFrom.Time))
+		require.True(t, event.DateTo.Equal(imported.DateTo.Time))
+		require.NotNil(t, imported.Recurrence)
 	}
 	s, db := exportService(t)
 	err = s.AddIcal(t.Context(), strings.NewReader("BEGIN:VEVENT\nDTSTART:bad\nEND:VEVENT"), nil, types.Null[string]{}, "user")
@@ -198,15 +297,15 @@ func TestAddIcalRejectsInvalidDurationBeforePersistence(t *testing.T) {
 		"DTSTART:20260101T090000Z\r\nDTEND:20260101T080000Z",
 		"DTSTART;VALUE=DATE:20260101\r\nDTEND;VALUE=DATE:20260101",
 		"DTSTART;VALUE=DATE:20260102\r\nDTEND;VALUE=DATE:20260101",
-		"DTSTART:20260101T090000Z\r\nDURATION:PT1H",
-		"DTSTART;VALUE=DATE:20260101\r\nDURATION:P2D",
+		"DTSTART:20260101T090000Z\r\nDURATION:invalid",
+		"DTSTART;VALUE=DATE:20260101\r\nDURATION:-P2D",
 		"DTSTART:20260101T090000Z\r\nDTEND:20260101T100000Z\r\nDURATION:PT1H",
 	} {
 		t.Run(dates, func(t *testing.T) {
 			s, db := exportService(t)
 			data := "BEGIN:VCALENDAR\r\n" + valid + "BEGIN:VEVENT\r\nUID:invalid\r\n" + dates + "\r\nEND:VEVENT\r\nEND:VCALENDAR"
 			err := s.AddIcal(t.Context(), strings.NewReader(data), nil, types.Null[string]{}, "user")
-			require.ErrorContains(t, err, "failed to parse ics: event invalid:")
+			require.ErrorContains(t, err, "failed to parse ics:")
 			require.Zero(t, db.addCalls)
 			require.Nil(t, db.added)
 		})

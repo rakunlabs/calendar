@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/rakunlabs/ada"
+	"github.com/rakunlabs/calendar/internal/core/port"
 )
 
 // Response is the calendar API envelope, including a payload even when it is nil.
@@ -48,6 +49,13 @@ func HTTPErrorHandler(c *ada.Context, err error) {
 		if he.Err != nil {
 			message.Err = he.Err.Error()
 		}
+	}
+	if errors.Is(err, port.ErrConflict) {
+		code = http.StatusConflict
+		message = &Message{Text: http.StatusText(code), Err: err.Error()}
+	} else if errors.Is(err, port.ErrInvalidEvent) {
+		code = http.StatusBadRequest
+		message = &Message{Text: http.StatusText(code), Err: err.Error()}
 	}
 
 	if c.Request.Method == http.MethodHead {

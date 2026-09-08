@@ -12,6 +12,7 @@ import (
 	"github.com/rakunlabs/query/adapter/adaptergoqu"
 	"github.com/worldline-go/types"
 
+	"github.com/rakunlabs/calendar/internal/core/port"
 	"github.com/rakunlabs/calendar/pkg/models"
 )
 
@@ -45,17 +46,32 @@ func setSchema(schema string) {
 }
 
 func (db *Database) AddEvents(ctx context.Context, events []models.Event) error {
-	updatedAt := types.Time{Time: time.Now()}
+	if len(events) == 0 {
+		return nil
+	}
+	updatedAt := types.Time{Time: time.Now().UTC().Truncate(time.Microsecond)}
+	rows := make([]goqu.Record, len(events))
 
 	for i := range events {
+		events[i].RecurrenceID = nil
+		events[i].IsOverride = false
 		if events[i].ID == "" {
 			events[i].ID = ulid.Make().String()
 		}
 		events[i].UpdatedAt = updatedAt
+		row, err := exp.NewRecordFromStruct(events[i], true, false)
+		if err != nil {
+			return err
+		}
+		// Mixed batches need the same columns despite recurrence's omitnil tag.
+		if events[i].Recurrence == nil {
+			row["recurrence"] = nil
+		}
+		rows[i] = row
 	}
 
 	_, err := db.q.Insert(TableEvents).
-		Rows(events).
+		Rows(rows).
 		OnConflict(goqu.DoNothing()).
 		Executor().ExecContext(ctx)
 	if err != nil {
@@ -157,17 +173,39 @@ func (db *Database) GetEvent(ctx context.Context, id string) (*models.Event, err
 }
 
 func (db *Database) UpdateEvent(ctx context.Context, id string, event *models.Event) error {
-	event.UpdatedAt = types.Time{Time: time.Now()}
+	updated := *event
+	updated.RecurrenceID = nil
+	updated.IsOverride = false
+	updated.UpdatedAt = types.Time{Time: time.Now().UTC().Truncate(time.Microsecond)}
+	if !updated.UpdatedAt.After(event.UpdatedAt.Time) {
+		updated.UpdatedAt = types.Time{Time: event.UpdatedAt.Add(time.Microsecond)}
+	}
+	where := goqu.Ex{"id": id}
+	if event.Recurrence != nil {
+		if event.UpdatedAt.IsZero() {
+			return port.ErrConflict
+		}
+		where["updated_at"] = event.UpdatedAt
+	} else {
+		// A concurrent recurrence-aware edit must not be overwritten by a legacy PUT.
+		where["recurrence"] = nil
+	}
 
-	_, err := db.q.Update(TableEvents).
-		Set(event).
-		Where(goqu.Ex{
-			"id": id,
-		}).
+	result, err := db.q.Update(TableEvents).
+		Set(&updated).
+		Where(where).
 		Executor().ExecContext(ctx)
 	if err != nil {
 		return err
 	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return port.ErrConflict
+	}
+	*event = updated
 
 	return nil
 }

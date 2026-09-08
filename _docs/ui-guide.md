@@ -36,9 +36,10 @@ add an event.
 3. Choose all-day or timed scheduling, set the start and end, and confirm the **Time zone**.
 4. Choose a **Repeat** preset if needed, then save. Use **Additional settings** for the disabled flag and optional **Updated by** audit label.
 
-To change an event, select it and save your changes. To remove it, choose delete
-in the editor and confirm. Disabling an event keeps it stored and editable while
-excluding it from ICS exports.
+To change an event, select it and save your changes. For recurring events, check
+the edit scope first (see below). Deleting a series removes the whole stored
+event; cancelling one occurrence keeps the series. Disabling an event keeps it
+stored and editable while excluding it from ICS exports.
 
 ### Dates and Time Zones
 
@@ -54,14 +55,48 @@ at 10:00 does not occupy the next time slot beginning at 10:00.
 
 ### Recurring Events
 
-Repeat options include daily, weekly, monthly, and yearly schedules, plus special
+Repeat options include secondly, minutely, hourly (timed events only), daily,
+weekly, monthly, and yearly schedules, plus special
 holiday presets. Existing advanced RRULE/FUNC rules are retained when editing
 unless you replace the repeat selection. Occurrences are expanded by the server.
 
-::: warning Whole-Series Changes
-Editing or deleting a recurring occurrence changes or deletes the entire stored
-series, not just that occurrence. There is no single-occurrence edit workflow.
+Choose **Edit scope** when opening a recurring occurrence:
+
+- **This occurrence** changes only that instance. **Cancel occurrence** hides it without deleting the series. A moved occurrence remains tied to its original scheduled date.
+- **Entire series** edits the master event. Existing overrides retain their own details. Deleting in this scope deletes the entire series.
+- **Reset this occurrence to series** removes its override. In the series editor, expand **Occurrence exceptions** to reset overrides or **Restore** cancelled occurrences. The sidebar's **Series exceptions** also opens series with cancellations, even when no occurrences are visible.
+
+Switching scope discards unsaved form edits. Reset/restore saves immediately and
+closes the editor without saving other form edits. If a save conflicts with
+another update, reload the event before retrying.
+
+Series dates, timezone, and repeat rule are read-only while exceptions exist.
+Reset overrides before changing timing; imported EXDATE/RDATE exclusions and
+additions also lock series timing and must be managed through ICS or the API.
+The UI preserves them but has no EXDATE/RDATE authoring or removal controls.
+
+::: warning Supported Scope
+Only a single occurrence or the entire series can be edited; "this and future
+occurrences" (`RANGE=THISANDFUTURE`) is not supported. Zero-duration timed events
+are not supported. Calendar does not implement all of RFC 5545.
 :::
+
+Imported `DURATION` is retained for details-only edits. A duration of `P1D` means
+one nominal calendar day, not necessarily 24 hours across daylight-saving changes;
+`PT24H` means exactly 24 hours. Changing timing replaces duration metadata with
+explicit start/end values. Leap second `60` is evaluated as `59`, but the original
+lexical value is retained for export when timing is unchanged.
+
+Custom ICS timezones are resolved by the server using a supported YEARLY
+observance-rule subset over years 1..9999. Events carrying imported timezone
+definitions have read-only timing controls and UTC fallback display, even when
+the timezone name is recognized: the imported rules may differ from browser rules.
+Use ICS or the API for those timing edits.
+
+The occurrences API limits each request to 400 days and 20,000 results. Expansion
+also has a work budget, including for hourly, minutely, and secondly rules.
+Exceeding a limit reports an error rather than silently omitting
+events; a narrower range may help.
 
 ## Groups and Entities
 
@@ -100,6 +135,11 @@ Choose an `.ics` file up to 9 MiB, optionally set an import group, time zone, an
 audit label, then choose **Import file**. Imports do not create entity assignments.
 Use the Assignments tab afterward if the imported events belong in an entity calendar.
 
+Supported recurrence data includes EXDATE, RDATE (including PERIOD start/end or
+start/duration), and same-UID detached overrides and cancellations. The master and
+its exceptions are stored together. Unsupported recurrence/timezone constructs
+are rejected rather than treated as full RFC support.
+
 ### Download a Calendar
 
 Choose **Export entity** and **Export group scope**, then **Download ICS**.
@@ -115,6 +155,13 @@ The optional **Download year** selects event series, not an exact clipping of th
 visible calendar range. Without a year, the default window is the previous year,
 current year, and next two years. An ICS download is a snapshot, not an automatically
 updating subscription.
+
+Ordinary recurring series retain their rules and exceptions; special FUNC and
+multiple-rule sets may be exported as standalone instances for the selected years.
+Timezone definitions are explicit: generated IANA definitions cover years 1..9999
+and can add hundreds of KiB per DST zone. Custom definitions are retained.
+Conflicting definitions for one TZID, including custom/IANA scope collisions,
+cause export to fail instead of silently reinterpreting events.
 
 ### Subscribe From Another Calendar
 

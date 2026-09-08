@@ -26,14 +26,14 @@ describe('editor all-day dates', () => {
 describe('editor timed duration', () => {
   it('preserves fractional-hour duration across midnight', () => {
     expect(moveEditorEnd('2026-09-07T09:30', '2026-09-07T11:00', '2026-09-07T23:30', 'UTC', false)).toBe(
-      '2026-09-08T01:00',
+      '2026-09-08T01:00:00',
     );
   });
 
   it('preserves elapsed duration across a DST transition', () => {
     expect(
       moveEditorEnd('2026-03-07T01:30', '2026-03-07T03:30', '2026-03-08T01:30', 'America/New_York', false),
-    ).toBe('2026-03-08T04:30');
+    ).toBe('2026-03-08T04:30:00');
   });
 
   it('rejects nonexistent start times instead of silently shifting them', () => {

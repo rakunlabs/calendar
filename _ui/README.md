@@ -17,7 +17,10 @@ make ui-build
 go run ./cmd/calendar
 ```
 
-The service serves the compiled UI at `/calendar/`; `/` redirects there.
+The service serves the compiled UI at `/calendar/` by default; `/` is outside that mount.
+The server's `base_path` config changes the UI, API and Swagger mount together.
+Leading/trailing slashes are normalized; `/` mounts at the root without a redirect.
+No UI rebuild specific to that path is needed.
 The frontend uses `base: './'` and relative API paths. A reverse proxy can mount
 the UI at another directory as long as its `v1` API is exposed alongside it.
 Directory URLs must end with `/`; subscription links resolve against that directory.
@@ -27,9 +30,11 @@ generation**. Dist is generated, not committed. Make targets and CI build it.
 ## Features
 
 - Month, week, day and year views, selected-day agenda and mini-calendar navigation.
-- Create, edit and delete events; edits/deletions affect the entire recurring series.
+- Create, edit and delete events; recurring events offer single-occurrence or
+  whole-series scope. Cancel one occurrence, reset an override, or restore a
+  cancellation from the series exceptions list (also reachable from the sidebar).
 - Group filtering, search, all-day and timed events, and disabled event visibility.
-- Daily, weekly, monthly and yearly presets. Existing advanced RRULE/FUNC rules
+- Secondly through yearly presets (sub-daily for timed events only). Existing advanced RRULE/FUNC rules
   are retained when editing. Occurrences are expanded on the server, not in JS.
 - Explicit time zones for editing; timed events display in the browser zone.
   All-day dates retain the event's own time zone. End timestamps are exclusive.
@@ -54,8 +59,53 @@ generation**. Dist is generated, not committed. Make targets and CI build it.
 The management UI adds no authentication. Protect it and the API at deployment.
 The `/calendar/v1/occurrences` API accepts RFC3339 `from` and `to` parameters,
 with an exclusive end and a maximum 400-day range / 20,000 returned instances.
-Expansion supports daily through yearly RRULE frequencies and existing FUNC
-holiday rules. Existing ICS and holiday APIs remain unchanged.
+Expansion supports SECONDLY through YEARLY RRULE frequencies and existing FUNC
+holiday rules, subject to a work budget as well as the result limit. Limit failures
+are errors, not partial results.
+
+## Recurrence Editing
+
+The editor fetches the master and sends versioned PUTs with its `updated_at`.
+Recurrence-aware writes with a missing/stale version return HTTP 409; reload before
+retrying. Occurrence results carry the master `id`, original `recurrence_id`, and
+`is_override`; moved starts must not replace the original recurrence identity.
+Single-occurrence changes replace/cancel an entry in the master's JSON
+`recurrence.overrides`, not a separate event row. The recursive DTO is
+`Event -> Recurrence -> OccurrenceOverride -> Event`.
+
+Legacy PUTs omitting `recurrence` preserve stored metadata, including exclusions,
+additions, overrides, lexical dates and timezone definitions. If the version is
+also absent the service uses the version just read, with a database concurrency
+check. The UI sends metadata explicitly and preserves advanced rules on
+details-only edits. Series timing/rule changes are blocked while overrides,
+EXDATE, or RDATE exist; remove exceptions in a separate update first.
+
+Switching scope discards unsaved form edits. Reset/restore saves immediately and
+closes the form without saving other edits. EXDATE/RDATE (including PERIOD) are
+supported through ICS/API and preserved by the UI, but there are no controls to
+author/remove them. Only single/series scope is available, not
+`RANGE=THISANDFUTURE`. Zero-duration timed events are unsupported.
+
+Imported DURATION survives details-only edits; changing timing replaces it with
+explicit start/end metadata. Weeks/days are nominal calendar units applied before
+exact hours/minutes/seconds, so `P1D` and `PT24H` can differ across DST. Leap second
+`60` falls back to `59` for evaluation while retained lexical metadata preserves
+`60` for export. Do not normalize untouched metadata through JavaScript dates.
+
+The server supports custom VTIMEZONE STANDARD/DAYLIGHT definitions with DTSTART,
+RDATE and a YEARLY RRULE subset (BYMONTH/BYMONTHDAY/BYDAY/BYSETPOS, INTERVAL, COUNT,
+UTC UNTIL) over civil years 1..9999. Browser-unsupported zones and events carrying
+imported definitions have read-only timing controls with UTC fallback display,
+including recognized names whose imported rules may differ. Exports preserve custom definitions and generate explicit grouped RDATE
+transitions for IANA zones over that range; DST definitions can be hundreds of
+KiB. Conflicting definitions or custom/IANA scope collisions fail explicitly.
+These capabilities are not a claim of complete RFC 5545 support.
+
+Migration `internal/adapter/repository/migrations/04_recurrence.sql` runs
+automatically at service startup and adds nullable JSONB metadata without
+replacing existing events or relations. The domain's recurrence database
+Value/Scan methods delegate to `types.JSON`; existing rows retain NULL metadata
+until recurrence data is written. See the root README for the API contract.
 
 ## Checks
 

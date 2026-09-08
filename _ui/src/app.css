@@ -145,6 +145,9 @@
 body {
   margin: 0;
 }
+ul {
+  list-style-type: square;
+}
 button,
 input,
 select,
@@ -271,6 +274,14 @@ textarea {
 }
 .secondary-button:hover:not(:disabled) {
   background: var(--hover-bg);
+}
+.series-exception-button {
+  width: 100%;
+  margin-block: 4px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: start;
+  justify-content: flex-start;
 }
 .new-event-sidebar {
   width: 100%;

@@ -668,6 +668,136 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "github_com_rakunlabs_calendar_internal_core_domain.CalendarDate": {
+            "type": "object",
+            "properties": {
+                "type": {
+                    "type": "string"
+                },
+                "tzid": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_rakunlabs_calendar_internal_core_domain.Event": {
+            "type": "object",
+            "properties": {
+                "all_day": {
+                    "type": "boolean"
+                },
+                "date_from": {
+                    "type": "string"
+                },
+                "date_to": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "disabled": {
+                    "type": "boolean"
+                },
+                "event_group": {
+                    "$ref": "#/definitions/types.Null-string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_override": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "recurrence": {
+                    "$ref": "#/definitions/github_com_rakunlabs_calendar_internal_core_domain.Recurrence"
+                },
+                "recurrence_id": {
+                    "$ref": "#/definitions/github_com_rakunlabs_calendar_internal_core_domain.CalendarDate"
+                },
+                "rrule": {
+                    "type": "string"
+                },
+                "tz": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "updated_by": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_rakunlabs_calendar_internal_core_domain.OccurrenceOverride": {
+            "type": "object",
+            "properties": {
+                "cancelled": {
+                    "type": "boolean"
+                },
+                "event": {
+                    "$ref": "#/definitions/github_com_rakunlabs_calendar_internal_core_domain.Event"
+                },
+                "recurrence_id": {
+                    "$ref": "#/definitions/github_com_rakunlabs_calendar_internal_core_domain.CalendarDate"
+                }
+            }
+        },
+        "github_com_rakunlabs_calendar_internal_core_domain.Recurrence": {
+            "type": "object",
+            "properties": {
+                "duration": {
+                    "type": "string"
+                },
+                "end": {
+                    "$ref": "#/definitions/github_com_rakunlabs_calendar_internal_core_domain.CalendarDate"
+                },
+                "exdates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_rakunlabs_calendar_internal_core_domain.CalendarDate"
+                    }
+                },
+                "overrides": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_rakunlabs_calendar_internal_core_domain.OccurrenceOverride"
+                    }
+                },
+                "rdates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_rakunlabs_calendar_internal_core_domain.RecurrencePeriod"
+                    }
+                },
+                "start": {
+                    "$ref": "#/definitions/github_com_rakunlabs_calendar_internal_core_domain.CalendarDate"
+                },
+                "timezones": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "github_com_rakunlabs_calendar_internal_core_domain.RecurrencePeriod": {
+            "type": "object",
+            "properties": {
+                "duration": {
+                    "type": "string"
+                },
+                "end": {
+                    "$ref": "#/definitions/github_com_rakunlabs_calendar_internal_core_domain.CalendarDate"
+                },
+                "start": {
+                    "$ref": "#/definitions/github_com_rakunlabs_calendar_internal_core_domain.CalendarDate"
+                }
+            }
+        },
         "github_com_rakunlabs_calendar_pkg_models.Event": {
             "type": "object",
             "properties": {
@@ -692,8 +822,17 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "is_override": {
+                    "type": "boolean"
+                },
                 "name": {
                     "type": "string"
+                },
+                "recurrence": {
+                    "$ref": "#/definitions/github_com_rakunlabs_calendar_internal_core_domain.Recurrence"
+                },
+                "recurrence_id": {
+                    "$ref": "#/definitions/github_com_rakunlabs_calendar_internal_core_domain.CalendarDate"
                 },
                 "rrule": {
                     "type": "string"

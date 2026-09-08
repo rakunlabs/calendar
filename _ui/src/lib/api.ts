@@ -1,3 +1,19 @@
+export interface CalendarDate {
+  value: string;
+  tzid?: string;
+  type?: string;
+}
+
+export interface Recurrence {
+  start?: CalendarDate;
+  end?: CalendarDate;
+  duration?: string;
+  exdates?: CalendarDate[];
+  rdates?: { start: CalendarDate; end?: CalendarDate; duration?: string }[];
+  overrides?: { recurrence_id: CalendarDate; cancelled?: boolean; event?: CalendarEvent }[];
+  timezones?: string[];
+}
+
 export interface CalendarEvent {
   id: string;
   name: string;
@@ -11,6 +27,9 @@ export interface CalendarEvent {
   disabled: boolean;
   updated_at?: string;
   updated_by?: string;
+  recurrence?: Recurrence | null;
+  recurrence_id?: CalendarDate;
+  is_override?: boolean;
 }
 
 interface Envelope<T> {
