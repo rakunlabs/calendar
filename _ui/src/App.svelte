@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick, onDestroy } from 'svelte';
+  import { tick, onDestroy, onMount } from 'svelte';
   import {
     CalendarDays,
     ChevronLeft,
@@ -16,7 +16,11 @@
     SlidersHorizontal,
   } from '@lucide/svelte';
   import { addDays, addMonths, addYears, format, isSameDay, isSameMonth, startOfMonth } from 'date-fns';
-  import { getEvents, getOccurrences, getRelations, type Relation, type CalendarEvent } from './lib/api';
+  import { getEvents, getOccurrences, getRelations, getSubscriptionOccurrences, saveEvent, type Relation, type CalendarEvent } from './lib/api';
+  import Subscriptions from './Subscriptions.svelte';
+  import { loadSubscriptions, storeSubscriptions, type Subscription } from './lib/subscriptions';
+  import { movedEvent } from './lib/eventMove';
+  import { dragEvent } from './lib/dragEvent';
   import {
     colorFor,
     dayKey,
@@ -57,6 +61,22 @@
   const entities = $derived([...new Set(relations.map(r => r.entity))].sort());
   let editor = $state<{ event: CalendarEvent | null; occurrence?: CalendarEvent; day: Date; hour?: number; endDay?: Date } | null>(null);
   let toast = $state('');
+  let moving = $state(false);
+  let subscriptions = $state<Subscription[]>([]);
+  let subscriptionEvents = $state<CalendarEvent[]>([]);
+  let subscriptionErrors = $state<string[]>([]);
+  let subscriptionLoading = $state(false);
+  let subscriptionRevision = $state(0);
+  onMount(() => {
+    try { subscriptions = loadSubscriptions(); }
+    catch { notify('Saved subscriptions could not be read from this browser.'); }
+    const timer = setInterval(() => subscriptionRevision++, 5 * 60 * 1000);
+    return () => clearInterval(timer);
+  });
+  function changeSubscriptions(items: Subscription[]) {
+    try { storeSubscriptions(items); subscriptions = items; return true; }
+    catch { notify('Could not save subscriptions. Check browser storage settings.'); return false; }
+  }
   let monthGrid = $state<HTMLDivElement>();
   let monthSelection = $state<{
     pointerId: number;
@@ -85,10 +105,10 @@
   const days = $derived(monthDays(focus));
   const range = $derived(viewRange(focus, view));
   const filtered = $derived(
-    occurrences.filter(
+    [...occurrences, ...subscriptionEvents].filter(
       (event) =>
         (showDisabled || !event.disabled) &&
-        !hiddenGroups.includes(groupName(event)) &&
+        (event.subscription_id || !hiddenGroups.includes(groupName(event))) &&
         `${event.name} ${event.description} ${event.event_group || ''}`
           .toLowerCase()
           .includes(search.toLowerCase().trim()),
@@ -167,6 +187,29 @@
     selected = focus;
   }
   $effect(() => {
+    revision; subscriptionRevision;
+    const feeds = subscriptions.filter(s => s.enabled);
+    const [from, to] = range;
+    const controller = new AbortController();
+    subscriptionLoading = feeds.length > 0;
+    subscriptionEvents = [];
+    subscriptionErrors = [];
+    Promise.all(feeds.map(async feed => {
+      try {
+        const events = await getSubscriptionOccurrences(feed.url, addDays(from, -1), addDays(to, 1), controller.signal);
+        return { events: events.map(e => ({ ...e, subscription_id: feed.id, event_group: feed.name })), error: '' };
+      } catch(e) {
+        return { events: [], error: `${feed.name}: ${e instanceof Error ? e.message : 'Could not load feed.'}` };
+      }
+    })).then(results => {
+      if (controller.signal.aborted) return;
+      subscriptionEvents = results.flatMap(r => r.events);
+      subscriptionErrors = results.flatMap(r => r.error ? [r.error] : []);
+      subscriptionLoading = false;
+    });
+    return () => controller.abort();
+  });
+  $effect(() => {
     focus;
     view;
     monthSelection = null;
@@ -219,6 +262,10 @@
       : [...hiddenGroups, group];
   }
   function openEvent(event: CalendarEvent) {
+    if (event.subscription_id) {
+      notify(`${event.name} · ${timeLabel(event)}${event.description ? ` · ${event.description}` : ''} · Read-only subscription; edit in the source calendar.`);
+      return;
+    }
     if (catalogLoading || catalogError) {
       notify('Refresh event details before editing.');
       return;
@@ -234,6 +281,23 @@
     toast = message;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => (toast = ''), 5000);
+  }
+  async function moveEvent(event: CalendarEvent, target: Date) {
+    if (moving || catalogLoading || catalogError || event.subscription_id) return;
+    const master = templates.find(e => e.id === event.id);
+    if (!master) return;
+    if (!event.all_day && target.getTime() === Date.parse(event.date_from)) return;
+    moving = true;
+    try {
+      const next = movedEvent(master, event, target);
+      if (JSON.stringify(next) === JSON.stringify(master)) return;
+      await saveEvent(next, true, '');
+      selected = target;
+      saved(event.recurrence_id && (master.rrule || master.recurrence?.overrides?.length)
+        ? 'Occurrence moved. Other occurrences are unchanged.' : 'Event moved.');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not move event. Please retry.');
+    } finally { moving = false; }
   }
   function saved(message: string) {
     editor = null;
@@ -357,6 +421,8 @@
         </details>
       {/if}
     </section>
+    <Subscriptions {subscriptions} onchange={changeSubscriptions} onrefresh={() => subscriptionRevision++}
+      loading={subscriptionLoading} errors={subscriptionErrors} />
     <div class="sidebar-bottom">
       <div class="zone-label"><Clock3 size={15} /><span>{localZone.replaceAll('_', ' ')}</span></div>
       <p>One place for all your plans.</p>
@@ -457,6 +523,7 @@
                   class="month-cell"
                   data-month-index={index}
                   data-date={dayKey(day)}
+                  data-drop-date={dayKey(day)}
                   class:range-selected={!!monthSelection &&
                     index >= Math.min(monthSelection.anchor, monthSelection.end) &&
                     index <= Math.max(monthSelection.anchor, monthSelection.end)}
@@ -484,6 +551,7 @@
                   >
                   <div class="cell-events">
                     {#each dayEvents.slice(0, 3) as event}<button
+                        use:dragEvent={{ event, day, enabled: !catalogLoading && !moving && !event.subscription_id, onmove: moveEvent }}
                         class={`event-chip event-color-${colorFor(groupName(event))}`}
                         class:disabled-event={event.disabled}
                         onclick={() => openEvent(event)}
@@ -511,7 +579,8 @@
                 dayCount={view === 'day' ? 1 : 7}
                 events={filtered}
                 {selected}
-                {catalogLoading}
+                catalogLoading={catalogLoading || moving}
+                onmove={moveEvent}
                 onselect={selectDay}
                 onopen={openEvent}
                 oncreate={(day, endDay) => {

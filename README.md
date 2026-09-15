@@ -15,11 +15,13 @@ organize calendars for different entities, and share feeds with calendar clients
 
 - Month, week, day, and year views with a selected-day agenda and mobile layout.
 - Create, edit, and delete all-day or timed events with explicit time zones.
+- Drag events between days in month view, or move timed events in 30-minute steps in week/day views. Recurring event moves affect only the selected occurrence.
 - Secondly through yearly recurrence, plus special holiday rules.
 - ICS/API recurrence sets with EXDATE, RDATE (including PERIOD), and same-UID
   occurrence overrides; the UI can edit or cancel one occurrence or edit a series.
 - Organize events into groups and assign groups or individual events to entities.
 - Import ICS files, download calendars, and copy subscription URLs with explicit scope.
+- Subscribe to external ICS/webcal feeds as read-only calendar overlays. Subscriptions are saved in the browser and refreshed every five minutes while the UI is open.
 - An embedded UI served by the Go binary; no frontend runtime server is needed in production.
 
 **Start here:** [Quickstart](https://rakunlabs.github.io/calendar/quickstart) ·

@@ -126,6 +126,7 @@ func (h *HTTP) RegisterRoutes(g *ada.Mux) {
 	g.ErrorHandler(HTTPErrorHandler)
 	g.GET("/events", h.GetEvents)
 	g.GET("/occurrences", h.Occurrences)
+	g.POST("/subscriptions/occurrences", h.SubscriptionOccurrences)
 	g.POST("/events", h.AddEvents)
 	g.DELETE("/events", h.DeleteEvents)
 

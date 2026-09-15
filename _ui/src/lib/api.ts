@@ -15,6 +15,7 @@ export interface Recurrence {
 }
 
 export interface CalendarEvent {
+  subscription_id?: string;
   id: string;
   name: string;
   description: string;
@@ -76,6 +77,15 @@ export function getOccurrences(from: Date, to: Date, signal?: AbortSignal, entit
   const search = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
   if (entity) search.set('entity', entity);
   return request<CalendarEvent[]>(`/occurrences?${search}`, { signal });
+}
+
+export function getSubscriptionOccurrences(url: string, from: Date, to: Date, signal?: AbortSignal) {
+  return request<CalendarEvent[]>('/subscriptions/occurrences', {
+    method: 'POST',
+    signal,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, from: from.toISOString(), to: to.toISOString() }),
+  });
 }
 
 export function saveEvent(event: CalendarEvent, existing: boolean, user: string) {

@@ -2,6 +2,7 @@
   import { addDays, format, isSameDay } from 'date-fns';
   import { onMount } from 'svelte';
   import type { CalendarEvent } from './lib/api';
+  import { dragEvent } from './lib/dragEvent';
   import { colorFor, groupName, localZone, occursOn } from './lib/calendar';
 
   let {
@@ -13,6 +14,7 @@
     onselect,
     onopen,
     oncreate,
+    onmove,
   }: {
     start: Date;
     dayCount?: 1 | 7;
@@ -22,6 +24,7 @@
     onselect: (day: Date) => void;
     onopen: (event: CalendarEvent) => void;
     oncreate: (start: Date, end: Date) => void;
+    onmove: (event: CalendarEvent, target: Date) => void;
   } = $props();
   let scroll: HTMLDivElement;
   let selection = $state<{ day: number; anchor: number; end: number } | null>(null);
@@ -109,7 +112,9 @@
 />
 
 <div class="week-help">
-  <span>{localZone}</span><span class="week-desktop-hint">Click a time or drag to select a range</span>
+  <span>{localZone}</span><span class="week-desktop-hint"
+    >Drag events to move in 30-minute steps · Drag empty times to create</span
+  >
   <span class="week-touch-hint">Tap a time; swipe to browse the {dayCount === 1 ? 'day' : 'week'}</span>
 </div>
 <div class="week-scroll" bind:this={scroll}>
@@ -126,9 +131,10 @@
     </div>
     <div class="week-all-day">
       <span>All day</span>
-      {#each days as day}<div>
+      {#each days as day}<div class="all-day-drop" data-drop-date={format(day, 'yyyy-MM-dd')}>
           {#each events.filter((e) => e.all_day && occursOn(e, day)) as event}
             <button
+              use:dragEvent={{ event, day, enabled: !catalogLoading && !event.subscription_id, onmove }}
               class={`event-chip event-color-${colorFor(groupName(event))}`}
               disabled={catalogLoading}
               onclick={() => onopen(event)}
@@ -144,7 +150,7 @@
           >{/each}
       </div>
       {#each days as day, index}
-        <div class="week-column" data-day={index}>
+        <div class="week-column" data-day={index} data-drop-date={format(day, 'yyyy-MM-dd')}>
           {#each slots as slot}<button
               class="week-slot"
               class:hour-start={slot % 2 === 0}
@@ -183,6 +189,12 @@
             >{/each}
           {#each timed[index] as item}
             <button
+              use:dragEvent={{
+                event: item.event,
+                day,
+                enabled: !catalogLoading && !item.event.subscription_id,
+                onmove,
+              }}
               class={`week-event event-color-${colorFor(groupName(item.event))}`}
               class:disabled-event={item.event.disabled}
               style:top={`${(item.from / 1440) * 100}%`}

@@ -1754,3 +1754,59 @@ main {
     scroll-behavior: auto !important;
   }
 }
+/* A drop highlights its destination without obscuring the existing schedule. */
+.event-dragging {
+  opacity: 0.45;
+  cursor: grabbing !important;
+}
+.event-drop-target {
+  outline: 2px solid var(--event-0, #6875d9);
+  outline-offset: -2px;
+  background-color: #6875d91a;
+}
+.event-chip,
+.week-event {
+  user-select: none;
+}
+.subscription-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+.subscription-row .group-filter {
+  min-width: 0;
+  flex: 1;
+}
+.subscription-row .group-filter span {
+  overflow-wrap: anywhere;
+}
+.subscription-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.subscription-form input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: inherit;
+}
+.event-drag-preview {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 12px;
+  box-shadow: 0 4px 16px #0003;
+  font-size: 12px;
+}
+.subscriptions > .secondary-button {
+  margin: 4px 0;
+}

@@ -15,6 +15,36 @@ Select a date in the calendar or mini-calendar to see its agenda.
 Week and day views place timed events on a time grid, with all-day events above it.
 Select an event in the calendar or agenda to open its editor.
 
+### Move an event
+
+With a mouse, drag an event to another date in **Month**, or to another time/day in
+**Week** and **Day**. The time grid snaps to **30-minute steps** and preserves the
+event's duration. Month moves retain the start time; all-day moves retain their
+calendar-day length. A preview shows the destination before you release. Press
+**Escape** or release outside the calendar to cancel.
+
+Moving a recurring event changes **only that occurrence**. Saving is automatic;
+if the server rejects the move, the original event stays in place and a message
+explains the error. Imported custom time zones cannot be moved in the browser.
+On touch devices or with a keyboard, open the event editor to change its dates.
+
+### Subscribe to an external calendar
+
+In the sidebar, choose **Subscribed calendars → Add subscription**, enter a name
+and a published **ICS / webcal URL**, then select **Subscribe**. For Outlook or
+Google Calendar, use the provider's ICS link rather than its calendar web page.
+The calendar service must be able to reach the public feed URL.
+
+Subscribed events appear alongside local events in all views, independently of
+the entity filter, and can be searched. They are **read-only**: make changes in
+the source calendar. Toggle a subscription's checkbox to hide/show it, use
+**Refresh feeds** to fetch updates immediately, or **×** to unsubscribe.
+
+The UI fetches feeds when you open it or change the displayed range, and every
+**five minutes** while open. Errors appear next to the subscription. Subscription
+names and URLs are stored in **this browser's local storage**, not synced between
+devices; the feed events are not imported into the local event database.
+
 ![Week view showing timed events and an all-day row](/screenshots/calendar-week-1440.png)
 
 - **Search events** matches event names, notes, and groups in the loaded calendar range.
