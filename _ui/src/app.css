@@ -241,7 +241,7 @@ textarea {
   display: inline-block;
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: 0;
   background: var(--success);
   flex-shrink: 0;
 }
@@ -703,7 +703,7 @@ main {
   width: 5px;
   height: 5px;
   background: currentColor;
-  border-radius: 50%;
+  border-radius: 0;
   flex-shrink: 0;
 }
 .event-chip-name {
@@ -941,7 +941,7 @@ main {
   width: 3px;
   height: 3px;
   background: currentColor;
-  border-radius: 50%;
+  border-radius: 0;
 }
 .weekly-layout {
   grid-template-columns: minmax(0, 1fr);
@@ -1674,7 +1674,7 @@ main {
   .mobile-dots span {
     width: 4px;
     height: 4px;
-    border-radius: 50%;
+    border-radius: 0;
   }
   .agenda {
     padding: 22px 20px;

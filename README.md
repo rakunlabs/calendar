@@ -113,7 +113,7 @@ make env
 make run
 ```
 
-Open **http://localhost:8080/calendar/**. Configuration is read from
+Open **http://localhost:8080/**. Configuration is read from
 `calendar.[toml|yaml|yml|json]` in the current directory, or the path in `CONFIG_FILE`.
 
 Set `base_path` to mount the UI, API, Swagger, and MCP under a path:
