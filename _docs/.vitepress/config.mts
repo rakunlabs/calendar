@@ -20,6 +20,7 @@ export default defineConfig({
       { text: "Overview", link: "/" },
       { text: "Quickstart", link: "/quickstart" },
       { text: "User Guide", link: "/ui-guide" },
+      { text: "AI Access (MCP)", link: "/mcp" },
     ],
 
     socialLinks: [

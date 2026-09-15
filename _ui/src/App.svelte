@@ -21,6 +21,8 @@
   import { loadSubscriptions, storeSubscriptions, type Subscription } from './lib/subscriptions';
   import { movedEvent } from './lib/eventMove';
   import { dragEvent } from './lib/dragEvent';
+  import { resizeAllDay } from './lib/resizeAllDay';
+  import { eventLanes } from './lib/eventLanes';
   import {
     colorFor,
     dayKey,
@@ -46,6 +48,11 @@
   let hiddenGroups = $state<string[]>([]);
   let showDisabled = $state(false);
   let filtersOpen = $state(false);
+  let sidebarCollapsed = $state(false);
+  function toggleSidebar() {
+    sidebarCollapsed = !sidebarCollapsed;
+    try { localStorage.setItem('calendar.sidebar-collapsed', String(sidebarCollapsed)); } catch { /* Keep the in-memory preference when storage is unavailable. */ }
+  }
   let templates = $state<CalendarEvent[]>([]);
   let occurrences = $state<CalendarEvent[]>([]);
   let catalogLoading = $state(true);
@@ -68,6 +75,7 @@
   let subscriptionLoading = $state(false);
   let subscriptionRevision = $state(0);
   onMount(() => {
+    try { sidebarCollapsed = localStorage.getItem('calendar.sidebar-collapsed') === 'true'; } catch { /* Use the default layout. */ }
     try { subscriptions = loadSubscriptions(); }
     catch { notify('Saved subscriptions could not be read from this browser.'); }
     const timer = setInterval(() => subscriptionRevision++, 5 * 60 * 1000);
@@ -115,6 +123,7 @@
     ),
   );
   const selectedEvents = $derived(filtered.filter((event) => occursOn(event, selected)));
+  const monthLanes = $derived(eventLanes(filtered, days));
   const daysWithEvents = $derived.by(() => {
     const map = new Map<string, CalendarEvent[]>();
     for (let day = range[0]; day < range[1]; day = addDays(day, 1))
@@ -282,18 +291,18 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => (toast = ''), 5000);
   }
-  async function moveEvent(event: CalendarEvent, target: Date) {
+  async function moveEvent(event: CalendarEvent, target: Date, end?: Date) {
     if (moving || catalogLoading || catalogError || event.subscription_id) return;
     const master = templates.find(e => e.id === event.id);
     if (!master) return;
-    if (!event.all_day && target.getTime() === Date.parse(event.date_from)) return;
+    if (!event.all_day && target.getTime() === Date.parse(event.date_from) && (!end || end.getTime() === Date.parse(event.date_to))) return;
     moving = true;
     try {
-      const next = movedEvent(master, event, target);
+      const next = movedEvent(master, event, target, end);
       if (JSON.stringify(next) === JSON.stringify(master)) return;
       await saveEvent(next, true, '');
       selected = target;
-      saved(event.recurrence_id && (master.rrule || master.recurrence?.overrides?.length)
+      saved(end ? 'Event duration updated.' : event.recurrence_id && (master.rrule || master.recurrence?.overrides?.length)
         ? 'Occurrence moved. Other occurrences are unchanged.' : 'Event moved.');
     } catch (e) {
       notify(e instanceof Error ? e.message : 'Could not move event. Please retry.');
@@ -322,10 +331,10 @@
   }}
 />
 
-<div class="app-shell">
+<div class="app-shell" class:sidebar-collapsed={sidebarCollapsed}>
   {#if filtersOpen}<button class="sidebar-backdrop" aria-label="Close calendar filters" onclick={closeFilters}
     ></button>{/if}
-  <aside class:mobile-open={filtersOpen} class="sidebar" aria-label="Calendar navigation">
+  <aside id="calendar-sidebar" class:mobile-open={filtersOpen} class="sidebar" aria-label="Calendar navigation">
     <button class="icon-button sidebar-close" aria-label="Close filters" onclick={closeFilters}
       ><X size={19} /></button
     >
@@ -435,6 +444,9 @@
   <main inert={filtersOpen}>
     <header class="topbar">
       <div class="breadcrumb">
+        <button class="icon-button sidebar-toggle" aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-expanded={!sidebarCollapsed} aria-controls="calendar-sidebar" onclick={toggleSidebar}>
+          {#if sidebarCollapsed}<ChevronRight size={19} />{:else}<ChevronLeft size={19} />{/if}
+        </button>
         <CalendarDays size={17} /><span>Workspace</span><span class="crumb-separator">/</span><strong
           >Calendar</strong
         >
@@ -519,6 +531,8 @@
             >
               {#each days as day, index}
                 {@const dayEvents = daysWithEvents.get(dayKey(day)) || []}
+                {@const visibleLanes = monthLanes[index].slice(0, 3)}
+                {@const hiddenCount = dayEvents.length - visibleLanes.filter(Boolean).length}
                 <div
                   class="month-cell"
                   data-month-index={index}
@@ -550,19 +564,23 @@
                     >{#if isSameDay(day, today)}<span class="today-word">Today</span>{/if}</button
                   >
                   <div class="cell-events">
-                    {#each dayEvents.slice(0, 3) as event}<button
+                    {#each visibleLanes as event}{#if event}<button
+                        use:resizeAllDay={{ event, day, enabled: !catalogLoading && !moving && !event.subscription_id, onresize: moveEvent }}
                         use:dragEvent={{ event, day, enabled: !catalogLoading && !moving && !event.subscription_id, onmove: moveEvent }}
                         class={`event-chip event-color-${colorFor(groupName(event))}`}
+                        class:all-day-segment={event.all_day}
+                        class:joins-left={event.all_day && index % 7 > 0 && occursOn(event, addDays(day, -1))}
+                        class:joins-right={event.all_day && index % 7 < 6 && occursOn(event, addDays(day, 1))}
                         class:disabled-event={event.disabled}
                         onclick={() => openEvent(event)}
                         disabled={catalogLoading}
                         title={`${event.name} · ${timeLabel(event)}`}
-                        ><span class="event-dot"></span><span class="event-chip-name"
+                         >{#if event.all_day && index % 7 === 0 && occursOn(event, addDays(day, -1))}<span aria-label="Continues from previous week">‹</span>{:else}<span class="event-dot"></span>{/if}<span class="event-chip-name"
                           >{event.name || 'Untitled event'}</span
-                        >{#if !event.all_day}<time>{timeLabel(event)}</time>{/if}</button
-                      >{/each}
-                    {#if dayEvents.length > 3}<button class="more-events" onclick={() => selectDay(day)}
-                        >+{dayEvents.length - 3} more</button
+                        >{#if !event.all_day}<time>{timeLabel(event)}</time>{:else if index % 7 === 6 && occursOn(event, addDays(day, 1))}<span aria-label="Continues on next week">›</span>{/if}</button
+                      >{:else}<span class="event-lane-spacer" aria-hidden="true"></span>{/if}{/each}
+                    {#if hiddenCount > 0}<button class="more-events" onclick={() => selectDay(day)}
+                        >+{hiddenCount} more</button
                       >{/if}
                   </div>
                   <div class="mobile-dots" aria-hidden="true">
@@ -581,6 +599,11 @@
                 {selected}
                 catalogLoading={catalogLoading || moving}
                 onmove={moveEvent}
+                onresize={(event, start, end) => moveEvent(event, start, end)}
+                oncreateAllDay={(day, endDay) => {
+                  selected = day;
+                  editor = { event: null, day, endDay };
+                }}
                 onselect={selectDay}
                 onopen={openEvent}
                 oncreate={(day, endDay) => {

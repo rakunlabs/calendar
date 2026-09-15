@@ -17,9 +17,9 @@ pnpm are needed only when building or developing the UI from source.
 CONFIG_FILE=/path/to/calendar.yaml ./calendar
 ```
 
-Open `http://localhost:8080/calendar/`. The service applies pending database
-migrations before starting the HTTP server; the migration connection needs
-permission to create and alter the application's tables.
+Open `http://localhost:8080/` — or the `base_path` you configured. The service
+applies pending database migrations before starting the HTTP server; the
+migration connection needs permission to create and alter the application's tables.
 
 ## Configuration
 
@@ -30,6 +30,7 @@ The following example matches the local development database:
 ```yaml
 log_level: info
 port: 8080
+base_path: /calendar
 
 db_type: pgx
 db_datasource: postgres://postgres@localhost:5432/postgres?sslmode=disable
@@ -40,7 +41,21 @@ migrate:
   db_type: pgx
   db_schema: public
   db_table: calendar_migrations
+
+mcp:
+  enabled: true
+  read_only: false
 ```
+
+`base_path` mounts the UI, API, Swagger, and MCP together. It has **no default**:
+leave it out to serve at the root, or set a path such as `/calendar`. Bare, leading,
+and trailing slashes are equivalent, and nested paths like `/tools/team/calendar` work.
+
+::: warning Upgrading From 0.x
+`base_path` previously defaulted to `/calendar`. A deployment that never set it now
+serves at the root, which moves the UI, the API, and every ICS subscription URL
+already added to calendar clients. Set `base_path: /calendar` to keep those URLs.
+:::
 
 The application and migration connections are configured separately; neither
 datasource has a default. They can use different database credentials, but must
@@ -82,6 +97,10 @@ database volumes and their data. It is not a data-preserving stop command.
 Calendar adds no authentication to the UI or API. Protect both with deployment-level
 access controls. `Updated by` sends an optional `X-User` audit label, not a login
 or verified identity. Entity filters and subscription URLs do not enforce authorization.
+
+The [MCP endpoint](/mcp) at `<base_path>/mcp` is enabled by default and lets an AI
+client rewrite every calendar. Restrict it, set `mcp.read_only`, or set
+`mcp.enabled: false`.
 
 Continue with the [User Guide](/ui-guide) to create events, assign calendars,
 and choose the scope of ICS downloads and subscriptions.

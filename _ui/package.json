@@ -13,7 +13,7 @@
     "format": "prettier --write src",
     "test:browser": "node tests/browser.mjs",
     "test:basepath": "node tests/basepath.browser.mjs",
-    "test:ui": "node tests/calendar.browser.mjs && node tests/editor.browser.mjs && node tests/theme.browser.mjs && node tests/tools.browser.mjs && node tests/move-subscriptions.browser.mjs"
+    "test:ui": "node tests/calendar.browser.mjs && node tests/editor.browser.mjs && node tests/theme.browser.mjs && node tests/tools.browser.mjs && node tests/move-subscriptions.browser.mjs && node tests/all-day.browser.mjs"
   },
   "dependencies": {
     "@fontsource-variable/manrope": "^5.2.8",

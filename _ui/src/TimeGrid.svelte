@@ -3,6 +3,9 @@
   import { onMount } from 'svelte';
   import type { CalendarEvent } from './lib/api';
   import { dragEvent } from './lib/dragEvent';
+  import { resizeEvent } from './lib/resizeEvent';
+  import { resizeAllDay } from './lib/resizeAllDay';
+  import { eventLanes } from './lib/eventLanes';
   import { colorFor, groupName, localZone, occursOn } from './lib/calendar';
 
   let {
@@ -15,6 +18,8 @@
     onopen,
     oncreate,
     onmove,
+    onresize,
+    oncreateAllDay,
   }: {
     start: Date;
     dayCount?: 1 | 7;
@@ -25,12 +30,17 @@
     onopen: (event: CalendarEvent) => void;
     oncreate: (start: Date, end: Date) => void;
     onmove: (event: CalendarEvent, target: Date) => void;
+    onresize: (event: CalendarEvent, start: Date, end: Date) => void;
+    oncreateAllDay: (start: Date, end: Date) => void;
   } = $props();
   let scroll: HTMLDivElement;
   let selection = $state<{ day: number; anchor: number; end: number } | null>(null);
+  let allDaySelection = $state<{ pointerId: number; anchor: number; end: number } | null>(null);
+  function cancelSelection() { selection = null; allDaySelection = null; }
   let activeSlot = $state({ day: 0, slot: 18 });
   const days = $derived(Array.from({ length: dayCount }, (_, i) => addDays(start, i)));
   const slots = Array.from({ length: 48 }, (_, i) => i);
+  const allDayLanes = $derived(eventLanes(events.filter(event => event.all_day), days));
   const timed = $derived(
     days.map((day) => {
       const items = events
@@ -82,6 +92,11 @@
   }
 
   function move(event: PointerEvent) {
+    if (allDaySelection && event.pointerId === allDaySelection.pointerId) {
+      const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-all-day-index]');
+      if (cell && scroll.contains(cell)) allDaySelection.end = Number(cell.dataset.allDayIndex);
+      return;
+    }
     if (!selection) return;
     const target = document
       .elementFromPoint(event.clientX, event.clientY)
@@ -93,7 +108,15 @@
       );
   }
 
-  function finish() {
+  function finish(event: PointerEvent) {
+    if (allDaySelection) {
+      if (event.pointerId !== allDaySelection.pointerId) return;
+      const { anchor, end } = allDaySelection;
+      allDaySelection = null;
+      const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-all-day-index]');
+      if (cell && scroll.contains(cell)) oncreateAllDay(days[Math.min(anchor, end)], days[Math.max(anchor, end)]);
+      return;
+    }
     if (!selection) return;
     const { day, anchor, end } = selection;
     selection = null;
@@ -104,16 +127,16 @@
 <svelte:window
   onpointermove={move}
   onpointerup={finish}
-  onpointercancel={() => (selection = null)}
-  onblur={() => (selection = null)}
+  onpointercancel={cancelSelection}
+  onblur={cancelSelection}
   onkeydown={(event) => {
-    if (event.key === 'Escape') selection = null;
+    if (event.key === 'Escape') cancelSelection();
   }}
 />
 
 <div class="week-help">
   <span>{localZone}</span><span class="week-desktop-hint"
-    >Drag events to move in 30-minute steps · Drag empty times to create</span
+    >Drag events to move · Drag top/bottom edges to resize · Drag across All day to create</span
   >
   <span class="week-touch-hint">Tap a time; swipe to browse the {dayCount === 1 ? 'day' : 'week'}</span>
 </div>
@@ -131,15 +154,33 @@
     </div>
     <div class="week-all-day">
       <span>All day</span>
-      {#each days as day}<div class="all-day-drop" data-drop-date={format(day, 'yyyy-MM-dd')}>
-          {#each events.filter((e) => e.all_day && occursOn(e, day)) as event}
+      {#each days as day, index}<div class="all-day-drop" data-drop-date={format(day, 'yyyy-MM-dd')} data-all-day-index={index}
+          class:all-day-selected={allDaySelection !== null && index >= Math.min(allDaySelection.anchor, allDaySelection.end) && index <= Math.max(allDaySelection.anchor, allDaySelection.end)}>
+          <button class="all-day-create" aria-label={`Create all-day event on ${format(day, 'MMMM d, yyyy')}`}
+            onpointerdown={(event) => {
+              if (event.button !== 0 || !event.isPrimary || event.pointerType === 'touch') return;
+              allDaySelection = { pointerId: event.pointerId, anchor: index, end: index };
+            }}
+            onclick={(event) => {
+              if (event.detail === 0 || (event instanceof PointerEvent && event.pointerType === 'touch')) oncreateAllDay(day, day);
+            }}></button>
+          {#each allDayLanes[index] as event}
+            {#if event}
             <button
+              use:resizeAllDay={{ event, day, enabled: !catalogLoading && !event.subscription_id, onresize }}
               use:dragEvent={{ event, day, enabled: !catalogLoading && !event.subscription_id, onmove }}
-              class={`event-chip event-color-${colorFor(groupName(event))}`}
+              class={`event-chip all-day-segment event-color-${colorFor(groupName(event))}`}
+              class:joins-left={index > 0 && occursOn(event, addDays(day, -1))}
+              class:joins-right={index < days.length - 1 && occursOn(event, addDays(day, 1))}
               disabled={catalogLoading}
               onclick={() => onopen(event)}
-              title={event.name}>{event.name || 'Untitled event'}</button
+              title={event.name}>
+              {#if index === 0 && occursOn(event, addDays(day, -1))}<span aria-label="Continues from previous days">‹</span>{/if}
+              <span class="event-chip-name">{event.name || 'Untitled event'}</span>
+              {#if index === days.length - 1 && occursOn(event, addDays(day, 1))}<span aria-label="Continues on following days">›</span>{/if}
+            </button
             >
+            {:else}<span class="event-lane-spacer" aria-hidden="true"></span>{/if}
           {/each}
         </div>{/each}
     </div>
@@ -189,6 +230,7 @@
             >{/each}
           {#each timed[index] as item}
             <button
+              use:resizeEvent={{ event: item.event, day, enabled: !catalogLoading && !item.event.subscription_id, onresize }}
               use:dragEvent={{
                 event: item.event,
                 day,

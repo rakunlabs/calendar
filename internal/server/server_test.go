@@ -90,7 +90,7 @@ func (f *fakeService) GetEventsICS(_ context.Context, q *query.Query) ([]domain.
 
 func request(t *testing.T, f *fakeService, method, path, body, user string) *httptest.ResponseRecorder {
 	t.Helper()
-	s, err := NewServer(context.Background(), f, "")
+	s, err := NewServer(context.Background(), f, "/calendar")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func assertJSON(t *testing.T, w *httptest.ResponseRecorder, code int, want strin
 
 func TestRecoveryMiddleware(t *testing.T) {
 	t.Run("middleware panic", func(t *testing.T) {
-		s, err := NewServer(context.Background(), &fakeService{}, "")
+		s, err := NewServer(context.Background(), &fakeService{}, "/calendar")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -141,7 +141,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 	})
 
 	t.Run("HTTP error panic is redacted", func(t *testing.T) {
-		s, err := NewServer(context.Background(), &fakeService{}, "")
+		s, err := NewServer(context.Background(), &fakeService{}, "/calendar")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -154,7 +154,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 	})
 
 	t.Run("partial response is not overwritten", func(t *testing.T) {
-		s, err := NewServer(context.Background(), &fakeService{}, "")
+		s, err := NewServer(context.Background(), &fakeService{}, "/calendar")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -266,7 +266,7 @@ func TestListBindingContentType(t *testing.T) {
 		for _, contentType := range []string{"", "text/plain", "application/x-www-form-urlencoded", "application/json; charset=utf-8"} {
 			t.Run(path+"/"+contentType, func(t *testing.T) {
 				f := &fakeService{}
-				s, err := NewServer(context.Background(), f, "")
+				s, err := NewServer(context.Background(), f, "/calendar")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -375,7 +375,7 @@ func TestReadAndDeleteRoutes(t *testing.T) {
 
 func TestICSAndSwagger(t *testing.T) {
 	f := &fakeService{}
-	s, err := NewServer(context.Background(), f, "")
+	s, err := NewServer(context.Background(), f, "/calendar")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +426,7 @@ func TestICSAndSwagger(t *testing.T) {
 
 func TestMiddlewareAndHead(t *testing.T) {
 	f := &fakeService{}
-	s, err := NewServer(context.Background(), f, "")
+	s, err := NewServer(context.Background(), f, "/calendar")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,4 +451,104 @@ func TestMiddlewareAndHead(t *testing.T) {
 	if w.Code != 404 || w.Body.Len() != 0 {
 		t.Fatalf("HEAD: %d %s", w.Code, w.Body)
 	}
+}
+
+func TestMCPEndpoint(t *testing.T) {
+	initialize := func(t *testing.T, s *ada.Server, path string) *httptest.ResponseRecorder {
+		t.Helper()
+		body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`
+		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Accept", "application/json, text/event-stream")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+
+	t.Run("absent unless enabled", func(t *testing.T) {
+		s, err := NewServer(context.Background(), &fakeService{}, "/calendar")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The UI's SPA fallback owns unknown GET paths, so assert on the protocol POST.
+		if w := initialize(t, s, "/calendar/mcp"); w.Code != http.StatusNotFound {
+			t.Fatalf("disabled MCP status = %d; body = %s", w.Code, w.Body)
+		}
+	})
+
+	t.Run("follows the base path", func(t *testing.T) {
+		for base, path := range map[string]string{"": "/mcp", "/tools/team/calendar": "/tools/team/calendar/mcp"} {
+			s, err := NewServer(context.Background(), &fakeService{}, base, WithMCP(config.MCP{Enabled: true}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if w := initialize(t, s, path); w.Code != http.StatusOK {
+				t.Fatalf("initialize %s: status = %d; body = %s", path, w.Code, w.Body)
+			}
+			if w := initialize(t, s, "/calendar/mcp"); w.Code == http.StatusOK {
+				t.Fatalf("MCP answered outside its mount for base %q", base)
+			}
+		}
+	})
+
+	t.Run("serves the calendar tools", func(t *testing.T) {
+		s, err := NewServer(context.Background(), &fakeService{}, "/tools/team/calendar", WithMCP(config.MCP{Enabled: true}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := initialize(t, s, "/tools/team/calendar/mcp")
+		var result struct {
+			Result struct {
+				ServerInfo struct{ Name string }
+			}
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+			t.Fatalf("invalid MCP response: %v; body = %s", err, w.Body)
+		}
+		if result.Result.ServerInfo.Name != config.ServiceName {
+			t.Fatalf("server info = %+v", result.Result)
+		}
+	})
+
+	t.Run("read-only hides write tools", func(t *testing.T) {
+		for _, readOnly := range []bool{false, true} {
+			s, err := NewServer(context.Background(), &fakeService{}, "/calendar", WithMCP(config.MCP{Enabled: true, ReadOnly: readOnly}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`
+			r := httptest.NewRequest(http.MethodPost, "/calendar/mcp", strings.NewReader(body))
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("Accept", "application/json, text/event-stream")
+			r.Header.Set("MCP-Protocol-Version", "2025-06-18")
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("tools/list status = %d; body = %s", w.Code, w.Body)
+			}
+			if got := strings.Contains(w.Body.String(), "create_event"); got == readOnly {
+				t.Fatalf("read_only=%v exposed create_event=%v", readOnly, got)
+			}
+			if !strings.Contains(w.Body.String(), "list_occurrences") {
+				t.Fatalf("read tools missing: %s", w.Body)
+			}
+		}
+	})
+
+	t.Run("CORS preflight allows MCP headers", func(t *testing.T) {
+		s, err := NewServer(context.Background(), &fakeService{}, "/calendar", WithMCP(config.MCP{Enabled: true}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest(http.MethodOptions, "/calendar/mcp", nil)
+		r.Header.Set("Origin", "https://example.com")
+		r.Header.Set("Access-Control-Request-Method", http.MethodPost)
+		r.Header.Set("Access-Control-Request-Headers", "content-type,mcp-session-id,mcp-protocol-version")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		allowed := strings.ToLower(w.Header().Get("Access-Control-Allow-Headers"))
+		if w.Code != http.StatusNoContent || !strings.Contains(allowed, "mcp-session-id") || !strings.Contains(allowed, "mcp-protocol-version") {
+			t.Fatalf("CORS preflight: %d %v", w.Code, w.Header())
+		}
+	})
 }

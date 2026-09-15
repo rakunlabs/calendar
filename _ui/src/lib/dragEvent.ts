@@ -15,6 +15,7 @@ export function dragEvent(node: HTMLButtonElement, options: Options) {
   let suppressClick = false;
   let clickTimer: ReturnType<typeof setTimeout>;
   function down(e: PointerEvent) {
+    if ((e.target as Element).closest('.event-resize-handle')) return;
     if (!options.enabled || e.button !== 0 || !e.isPrimary || e.pointerType === 'touch') return;
     cleanup();
     const original = options;
@@ -23,19 +24,47 @@ export function dragEvent(node: HTMLButtonElement, options: Options) {
     let highlighted: HTMLElement | null = null;
     const preview = document.createElement('div');
     preview.className = 'event-drag-preview';
-    preview.setAttribute('role', 'status');
+    preview.setAttribute('aria-hidden', 'true');
+    preview.inert = true;
+    const status = document.createElement('div');
+    status.className = 'event-drag-status';
+    status.setAttribute('role', 'status');
+    const bounds = node.getBoundingClientRect();
+    const grabX = e.clientX - bounds.left;
+    const grabY = e.clientY - bounds.top;
     const root = node.closest('.calendar-surface');
     const column = node.closest<HTMLElement>('.week-column');
     const anchor = column ? Math.floor((e.clientY - column.getBoundingClientRect().top) / 28) : 0;
     function move(p: PointerEvent) {
       if (p.pointerId !== e.pointerId) return;
       if (!dragging && Math.hypot(p.clientX - e.clientX, p.clientY - e.clientY) < 5) return;
-      dragging = true;
-      node.classList.add('event-dragging');
-      if (!preview.isConnected) document.body.append(preview);
-      preview.style.left = `${Math.min(p.clientX + 14, window.innerWidth - 240)}px`;
-      preview.style.top = `${p.clientY + 14}px`;
-      preview.textContent = 'Move outside the calendar to cancel';
+      if (!dragging) {
+        // Snapshot before dimming the source, including styles inherited from its view.
+        const card = node.cloneNode(true) as HTMLButtonElement;
+        const sources = [node, ...node.querySelectorAll<HTMLElement>('*')];
+        const copies = [card, ...card.querySelectorAll<HTMLElement>('*')];
+        sources.forEach((source, index) => {
+          const copy = copies[index];
+          const style = getComputedStyle(source);
+          for (const property of style) copy.style.setProperty(property, style.getPropertyValue(property));
+          copy.removeAttribute('id');
+        });
+        Object.assign(card.style, {
+          position: 'static', margin: '0', width: `${bounds.width}px`,
+          height: `${bounds.height}px`, minWidth: '0', maxWidth: 'none',
+          boxSizing: 'border-box', transform: 'none', transition: 'none',
+          pointerEvents: 'none',
+        });
+        preview.append(card);
+        document.body.append(preview, status);
+        dragging = true;
+        node.classList.add('event-dragging');
+      }
+      preview.style.left = `${p.clientX - grabX}px`;
+      preview.style.top = `${p.clientY - grabY}px`;
+      status.style.left = `${Math.max(8, Math.min(p.clientX + 14, window.innerWidth - status.offsetWidth - 8))}px`;
+      status.style.top = `${Math.max(8, Math.min(p.clientY + bounds.height - grabY + 8, window.innerHeight - status.offsetHeight - 8))}px`;
+      status.textContent = 'Move outside the calendar to cancel';
       highlighted?.classList.remove('event-drop-target');
       target = null;
       const hit = document.elementFromPoint(p.clientX, p.clientY)?.closest<HTMLElement>('[data-drop-date]');
@@ -60,7 +89,7 @@ export function dragEvent(node: HTMLButtonElement, options: Options) {
           : new Date(original.event.date_from);
         target = addDays(from, differenceInCalendarDays(day, original.day));
       }
-      preview.textContent = format(
+      status.textContent = format(
         target,
         original.event.all_day ? "EEE, MMM d · 'All day'" : 'EEE, MMM d · HH:mm',
       );
@@ -85,6 +114,7 @@ export function dragEvent(node: HTMLButtonElement, options: Options) {
     cleanup = () => {
       node.classList.remove('event-dragging');
       preview.remove();
+      status.remove();
       highlighted?.classList.remove('event-drop-target');
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);

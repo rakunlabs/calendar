@@ -1,6 +1,7 @@
 # User Guide
 
-Open `/calendar/` on your running service, or follow the [Quickstart](/quickstart)
+Open your running service at its configured `base_path` — `/` unless you set one —
+or follow the [Quickstart](/quickstart)
 to start a local instance. Calendar combines an event editor, calendar views,
 entity assignments, and ICS tools in one interface.
 

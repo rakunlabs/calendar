@@ -15,7 +15,7 @@ import (
 )
 
 func TestEmbeddedUI(t *testing.T) {
-	s, err := NewServer(context.Background(), &fakeService{}, "")
+	s, err := NewServer(context.Background(), &fakeService{}, "/calendar")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,15 +54,15 @@ func TestEmbeddedUI(t *testing.T) {
 
 func TestBasePath(t *testing.T) {
 	for _, tt := range []struct{ name, input, prefix string }{
-		{"default", "", "/calendar"},
+		{"unset serves at the root", "", ""},
+		{"whitespace only", " \t\n", ""},
+		{"explicit root", "/", ""},
 		{"bare", "calendar", "/calendar"},
 		{"leading slash", "/calendar", "/calendar"},
 		{"trailing slash", "calendar/", "/calendar"},
 		{"both slashes", "/calendar/", "/calendar"},
-		{"whitespace only", " \t\n", "/calendar"},
 		{"surrounding whitespace", " \t/calendar/\n", "/calendar"},
 		{"nested", "tools/team/calendar/", "/tools/team/calendar"},
-		{"root", "/", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &fakeService{events: []domain.Event{{ID: "id"}}}

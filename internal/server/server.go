@@ -16,19 +16,33 @@ import (
 	mtelemetry "github.com/rakunlabs/ada/middleware/telemetry"
 
 	"github.com/rakunlabs/calendar/internal/adapter/handler"
+	"github.com/rakunlabs/calendar/internal/adapter/mcp"
 	"github.com/rakunlabs/calendar/internal/config"
 	"github.com/rakunlabs/calendar/internal/core/port"
 	_ "github.com/rakunlabs/calendar/internal/server/docs"
 )
 
+// Option adjusts optional server surfaces that the core API does not require.
+type Option func(*options)
+
+type options struct {
+	mcp config.MCP
+}
+
+// WithMCP mounts the Model Context Protocol endpoint at <base_path>/mcp.
+func WithMCP(cfg config.MCP) Option {
+	return func(o *options) { o.mcp = cfg }
+}
+
 // @title calendar API
 // @BasePath /calendar/v1
-func NewServer(_ context.Context, svc port.CalendarService, basePath string) (*ada.Server, error) {
-	basePath = strings.TrimSpace(basePath)
-	if basePath == "" {
-		basePath = "/calendar"
+func NewServer(_ context.Context, svc port.CalendarService, basePath string, opts ...Option) (*ada.Server, error) {
+	settings := options{}
+	for _, opt := range opts {
+		opt(&settings)
 	}
-	prefix := strings.Trim(basePath, "/")
+	// An unset base path serves at the root; there is no implicit mount point.
+	prefix := strings.Trim(strings.TrimSpace(basePath), "/")
 	if prefix != "" {
 		prefix = "/" + prefix
 	}
@@ -44,7 +58,10 @@ func NewServer(_ context.Context, svc port.CalendarService, basePath string) (*a
 			handler.HTTPErrorHandler(ada.NewContext(w, r), ada.NewHTTPError(http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError)))
 		})),
 		mserver.Middleware(config.ServiceName),
-		(&mcors.Cors{AllowHeaders: []string{"Content-Type", "Authorization", "X-User", "X-Request-Id"}}).Middleware(),
+		(&mcors.Cors{
+			AllowHeaders:  []string{"Content-Type", "Authorization", "X-User", "X-Request-Id", "Accept", "Last-Event-ID", "Mcp-Session-Id", "Mcp-Protocol-Version"},
+			ExposeHeaders: []string{"Mcp-Session-Id", "Mcp-Protocol-Version"},
+		}).Middleware(),
 		mrequestid.Middleware(),
 		mlog.Middleware(),
 		mtelemetry.Middleware(),
@@ -68,6 +85,9 @@ func NewServer(_ context.Context, svc port.CalendarService, basePath string) (*a
 	}))
 
 	handleHTTP.RegisterRoutes(api)
+	if settings.mcp.Enabled {
+		calendar.Handle("/mcp", mcp.New(svc, settings.mcp.ReadOnly).HTTPHandler())
+	}
 	if err := registerUI(calendar, prefix); err != nil {
 		return nil, err
 	}

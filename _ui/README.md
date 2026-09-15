@@ -17,9 +17,10 @@ make ui-build
 go run ./cmd/calendar
 ```
 
-The service serves the compiled UI at `/calendar/` by default; `/` is outside that mount.
-The server's `base_path` config changes the UI, API and Swagger mount together.
-Leading/trailing slashes are normalized; `/` mounts at the root without a redirect.
+The service serves the compiled UI at the server's `base_path`, which moves the UI,
+API, Swagger and MCP together. It has no default, so an unset `base_path` serves at
+the root; the checked-in `calendar.yaml` sets `/calendar`. Anything outside the mount
+is a 404. Leading/trailing slashes are normalized and `/` mounts at the root without a redirect.
 No UI rebuild specific to that path is needed.
 The frontend uses `base: './'` and relative API paths. A reverse proxy can mount
 the UI at another directory as long as its `v1` API is exposed alongside it.

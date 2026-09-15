@@ -11,7 +11,7 @@ DOCKER_COMPOSE := docker compose --project-name=$(BINARY) --file=env/docker-comp
 .DEFAULT_GOAL := help
 
 .PHONY: run
-run: ui-build ## Build the UI and run the application
+run: ## Build the UI and run the application
 	go run $(MAIN_FILE)
 
 .PHONY: env

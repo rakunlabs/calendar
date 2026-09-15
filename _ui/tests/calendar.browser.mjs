@@ -88,7 +88,7 @@ try {
     await page.getByRole('dialog').waitFor();
     assert.equal(await page.getByLabel('Start date', { exact: true }).inputValue(), dates[rangeStart]);
     assert.equal(await page.getByLabel('End date', { exact: true }).inputValue(), dates[rangeEnd]);
-    await expect(page.getByLabel('All-day event')).toBeChecked();
+    await expect(page.getByLabel('All-day event', { exact: true })).toBeChecked();
     assert.equal(await page.getByLabel('Time zone', { exact: true }).inputValue(), 'Europe/Istanbul');
     await page.getByLabel('Event name', { exact: true }).fill('Month range regression');
     await Promise.all([
@@ -107,7 +107,7 @@ try {
   await page.getByRole('dialog').waitFor();
   assert.equal(await page.getByLabel('Start date', { exact: true }).inputValue(), dates[10]);
   assert.equal(await page.getByLabel('End date', { exact: true }).inputValue(), dates[10]);
-  await expect(page.getByLabel('All-day event')).toBeChecked();
+  await expect(page.getByLabel('All-day event', { exact: true })).toBeChecked();
   await cancel();
   await cell(11).locator('.day-select').click();
   await expect(cell(11)).toHaveClass(/selected-day/);
@@ -116,6 +116,37 @@ try {
   await page.getByRole('button', { name: 'Week', exact: true }).click();
   await page.locator('.week-scroll').waitFor();
   assert.equal(await page.locator('.week-slot').count(), 336);
+  const allDayCell = index => page.locator(`[data-all-day-index="${index}"]`);
+  const allDayDates = await page.locator('[data-all-day-index]').evaluateAll(cells => cells.map(cell => cell.dataset.dropDate));
+  await allDayCell(1).locator('.all-day-create').click();
+  await expect(page.getByLabel('All-day event', { exact: true })).toBeChecked();
+  await expect(page.getByLabel('Start date', { exact: true })).toHaveValue(allDayDates[1]);
+  await expect(page.getByLabel('End date', { exact: true })).toHaveValue(allDayDates[1]);
+  await cancel();
+  for (const reverse of [false, true]) {
+    await beginDrag(allDayCell(reverse ? 3 : 1).locator('.all-day-create'), allDayCell(reverse ? 1 : 3));
+    await expect(page.locator('.all-day-selected')).toHaveCount(3);
+    await page.mouse.up();
+    await expect(page.getByLabel('All-day event', { exact: true })).toBeChecked();
+    await expect(page.getByLabel('Start date', { exact: true })).toHaveValue(allDayDates[1]);
+    await expect(page.getByLabel('End date', { exact: true })).toHaveValue(allDayDates[3]);
+    if (reverse) await cancel();
+    else {
+      await page.getByLabel('Event name', { exact: true }).fill('Three-day all-day event');
+      await page.getByRole('dialog').getByRole('button', { name: 'Create event', exact: true }).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      const exclusiveEnd = new Date(`${allDayDates[3]}T00:00:00+03:00`);
+      exclusiveEnd.setUTCDate(exclusiveEnd.getUTCDate() + 1);
+      assert.equal(writes.at(-1).all_day, true);
+      assert.equal(writes.at(-1).date_from, new Date(`${allDayDates[1]}T00:00:00+03:00`).toISOString());
+      assert.equal(writes.at(-1).date_to, exclusiveEnd.toISOString());
+    }
+  }
+  await checkCancellation(allDayCell(1).locator('.all-day-create'), allDayCell(3), page.locator('.all-day-selected'));
+  await allDayCell(0).locator('.all-day-create').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByLabel('All-day event', { exact: true })).toBeChecked();
+  await cancel();
   const heading = await page.locator('.calendar-toolbar h1').textContent();
   await page.getByRole('button', { name: 'Next week', exact: true }).click();
   assert.notEqual(await page.locator('.calendar-toolbar h1').textContent(), heading);
@@ -149,6 +180,10 @@ try {
   await slot(5, 18).focus();
   await expect(slot(5, 18)).toHaveAttribute('tabindex', '0');
   await page.getByRole('button', { name: 'Day', exact: true }).click();
+  await page.locator('.all-day-create').click();
+  await expect(page.getByLabel('All-day event', { exact: true })).toBeChecked();
+  assert.equal(await page.getByLabel('Start date', { exact: true }).inputValue(), await page.getByLabel('End date', { exact: true }).inputValue());
+  await cancel();
   await expect(page.locator('.week-slot')).toHaveCount(48);
   await expect(page.locator('.week-slot:not([data-day="0"])')).toHaveCount(0);
   const focusable = page.locator('.week-slot[tabindex="0"]');
@@ -252,9 +287,12 @@ try {
   await mobile.goto(base);
   await mobile.locator('.month-add').nth(10).tap();
   await mobile.getByRole('dialog').waitFor();
-  await expect(mobile.getByLabel('All-day event')).toBeChecked();
+  await expect(mobile.getByLabel('All-day event', { exact: true })).toBeChecked();
   await mobile.getByRole('button', { name: 'Cancel', exact: true }).tap();
   await mobile.getByRole('button', { name: 'Week', exact: true }).click();
+  await mobile.locator('.all-day-create').first().tap();
+  await expect(mobile.getByLabel('All-day event', { exact: true })).toBeChecked();
+  await mobile.getByRole('button', { name: 'Cancel', exact: true }).tap();
   await mobile.locator('[data-week-slot="18"][data-day="0"]').tap();
   await mobile.getByRole('dialog').waitFor();
   assert.equal(await mobile.getByLabel('Start time', { exact: true }).inputValue(), '09:00');

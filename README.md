@@ -23,9 +23,11 @@ organize calendars for different entities, and share feeds with calendar clients
 - Import ICS files, download calendars, and copy subscription URLs with explicit scope.
 - Subscribe to external ICS/webcal feeds as read-only calendar overlays. Subscriptions are saved in the browser and refreshed every five minutes while the UI is open.
 - An embedded UI served by the Go binary; no frontend runtime server is needed in production.
+- A Model Context Protocol endpoint at `<base_path>/mcp` so AI clients can read the schedule, find free time, and manage events.
 
 **Start here:** [Quickstart](https://rakunlabs.github.io/calendar/quickstart) ·
 [User guide](https://rakunlabs.github.io/calendar/ui-guide) ·
+[AI access (MCP)](https://rakunlabs.github.io/calendar/mcp) ·
 [Releases](https://github.com/rakunlabs/calendar/releases/latest) ·
 [UI development](_ui/README.md)
 
@@ -37,6 +39,9 @@ database serialization and scanning, stored atomically with the master event.
 The UI and API have **no built-in authentication**: protect them at deployment.
 The optional `Updated by` / `X-User` value is an audit label, not a verified identity
 or an access control mechanism. Entity filters and subscription URLs do not restrict access.
+The same applies to the MCP endpoint, which is enabled by default and grants AI
+clients the authority the REST API already grants. Set `mcp.read_only: true` to
+publish only its read tools, or `mcp.enabled: false` to remove it.
 
 ## Recurrence and API Contract
 
@@ -111,16 +116,23 @@ make run
 Open **http://localhost:8080/calendar/**. Configuration is read from
 `calendar.[toml|yaml|yml|json]` in the current directory, or the path in `CONFIG_FILE`.
 
-Set `base_path` to mount the UI, API, and Swagger under another path:
+Set `base_path` to mount the UI, API, Swagger, and MCP under a path:
 
 ```yaml
 base_path: /calendar
 ```
 
-The default is `/calendar`. `calendar`, `/calendar`, `calendar/`, and `/calendar/`
-are equivalent; surrounding whitespace is trimmed. Nested paths such as
-`/tools/team/calendar` work too. Use `/` to serve at the root. The UI directory
-redirect keeps its trailing slash so relative API and asset URLs resolve correctly.
+**Unset `base_path` serves at the root**, so the UI is at `/` and the API at `/v1`.
+The checked-in `calendar.yaml` sets `/calendar`, which is why `make run` serves there.
+`calendar`, `/calendar`, `calendar/`, and `/calendar/` are equivalent; surrounding
+whitespace is trimmed. Nested paths such as `/tools/team/calendar` work too. The UI
+directory redirect keeps its trailing slash so relative API and asset URLs resolve
+correctly.
+
+> **Upgrading:** `base_path` no longer defaults to `/calendar`. A deployment that
+> relied on that default now serves at the root, which moves the UI, API, Swagger,
+> and every ICS subscription URL already handed to calendar clients. Set
+> `base_path: /calendar` to keep the previous paths.
 
 > The Compose database uses trust authentication and is for local development only.
 > Do not expose it to untrusted networks. `make env-down` runs Compose with

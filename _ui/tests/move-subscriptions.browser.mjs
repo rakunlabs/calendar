@@ -45,12 +45,26 @@ try {
     await from.scrollIntoViewIfNeeded();
     const a = await from.boundingBox();
     const b = await to.boundingBox();
-    await page.mouse.move(a.x + a.width / 2, a.y + 5);
+    const appearance = el => {
+      const style = getComputedStyle(el);
+      return [el.textContent, style.backgroundColor, style.color, style.fontSize, style.borderRadius];
+    };
+    await from.evaluate(el => { el.style.transition = 'none'; });
+    await page.mouse.move(a.x + a.width / 2, a.y + 12);
     await page.mouse.down();
-    await page.mouse.move(b.x + b.width / 2, b.y + 5, { steps: 10 });
+    const originalAppearance = await from.evaluate(appearance);
+    await page.mouse.move(b.x + b.width / 2, b.y + 12, { steps: 10 });
     await expect(page.locator('.event-drag-preview')).toBeVisible();
+    const preview = page.locator('.event-drag-preview > button');
+    const box = await preview.boundingBox();
+    assert(Math.abs(box.width - a.width) < 1, 'Dragged card preserves width');
+    assert(Math.abs(box.height - a.height) < 1, 'Dragged card preserves height');
+    assert(Math.abs(box.x - (b.x + b.width / 2 - a.width / 2)) < 1, 'Pointer keeps its horizontal grab offset');
+    assert(Math.abs(box.y - b.y) < 1, 'Pointer keeps its vertical grab offset');
+    assert.deepEqual(await preview.evaluate(appearance), originalAppearance);
     if (cancel) await page.keyboard.press('Escape');
     await page.mouse.up();
+    await expect(page.locator('.event-drag-preview, .event-drag-status')).toHaveCount(0);
   };
   await drag(source, destination, true);
   assert.equal(writes.length, 0);
@@ -91,6 +105,51 @@ try {
   await page.getByRole('button', { name: 'Day', exact: true }).click();
   await expect(page.locator('.week-event')).toBeEnabled();
 
+  // Bottom-edge resizing preserves start, previews the new height and supports cancellation.
+  const resize = async (delta, cancel = false, atStart = false) => {
+    const event = page.locator('.week-event');
+    await event.scrollIntoViewIfNeeded();
+    await event.hover();
+    const before = await event.boundingBox();
+    const grip = await event.locator(atStart ? '.event-resize-start' : '.event-resize-handle:not(.event-resize-start)').boundingBox();
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height - 2);
+    await page.mouse.down();
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height - 2 + delta, { steps: 8 });
+    await expect(event).toHaveClass(/event-resizing/);
+    assert(Math.abs((await event.boundingBox()).height - before.height - (atStart ? -delta : delta)) < 1);
+    assert(Math.abs((await event.boundingBox()).y - before.y - (atStart ? delta : 0)) < 1);
+    await expect(page.locator('.event-drag-preview')).toHaveCount(0);
+    if (cancel) await page.keyboard.press('Escape');
+    await page.mouse.up();
+    await expect(page.locator('.event-resizing')).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  };
+  const beforeResize = writes.length;
+  const originalStart = master.date_from;
+  const originalEnd = Date.parse(master.date_to);
+  await resize(28, true);
+  assert.equal(writes.length, beforeResize);
+  await resize(28);
+  await expect.poll(() => writes.length).toBe(beforeResize + 1);
+  assert.equal(master.date_from, new Date(originalStart).toISOString());
+  assert.equal(Date.parse(master.date_to), originalEnd + 30 * 60_000);
+  await expect(page.locator('.week-event')).toBeEnabled();
+  await resize(-28);
+  await expect.poll(() => writes.length).toBe(beforeResize + 2);
+  assert.equal(Date.parse(master.date_to), originalEnd);
+  await expect(page.locator('.week-event')).toBeEnabled();
+  await resize(-28, true, true);
+  assert.equal(writes.length, beforeResize + 2);
+  await resize(-28, false, true);
+  await expect.poll(() => writes.length).toBe(beforeResize + 3);
+  assert.equal(Date.parse(master.date_from), Date.parse(originalStart) - 30 * 60_000);
+  assert.equal(Date.parse(master.date_to), originalEnd);
+  await expect(page.locator('.week-event')).toBeEnabled();
+  await resize(28, false, true);
+  await expect.poll(() => writes.length).toBe(beforeResize + 4);
+  assert.equal(Date.parse(master.date_from), Date.parse(originalStart));
+  assert.equal(Date.parse(master.date_to), originalEnd);
+
   await page.getByRole('button', { name: 'Add subscription', exact: true }).click();
   await page.getByLabel('Calendar name', { exact: true }).fill('External team');
   await page.getByLabel('ICS / webcal URL').fill('webcal://example.com/team.ics');
@@ -119,6 +178,15 @@ try {
   await expect(page.getByRole('checkbox', { name: 'External team' })).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole('checkbox', { name: 'External team' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Hide sidebar', exact: true }).click();
+  await expect(page.locator('.sidebar')).toBeHidden();
+  await page.reload();
+  await expect(page.locator('.sidebar')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Show sidebar', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await page.getByRole('button', { name: 'Show sidebar', exact: true }).click();
+  await expect(page.locator('.sidebar')).toBeVisible();
+  await page.reload();
+  await expect(page.locator('.sidebar')).toBeVisible();
   assert.deepEqual(errors, []);
   console.log('Event moves and subscriptions: passed');
 } finally {
